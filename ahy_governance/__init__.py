@@ -1,6 +1,6 @@
 """Ahy Governance — Multi-Agent Governance Platform.
 
-Conflict Detection, Cost Tracking, Audit Logging, Health Monitoring, RBAC for AI Agent deployments.
+Conflict Detection, Cost Tracking, Audit Logging, Health Monitoring, RBAC, Prompt Guard for AI Agent deployments.
 """
 
 from .conflict_detector import (
@@ -45,8 +45,16 @@ from .rbac import (
     User,
     get_access_manager,
 )
+from .prompt_guard import (
+    PromptGuard,
+    InjectionResult,
+    MaskResult,
+    SanitizeResult,
+    get_guard,
+    sanitize_prompt,
+)
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 __all__ = [
     # Conflict Detector
     "ConflictDetector",
@@ -85,4 +93,11 @@ __all__ = [
     "Workspace",
     "User",
     "get_access_manager",
+    # Prompt Guard
+    "PromptGuard",
+    "InjectionResult",
+    "MaskResult",
+    "SanitizeResult",
+    "get_guard",
+    "sanitize_prompt",
 ]
