@@ -2,7 +2,7 @@
 
 **Multi-Agent Governance Platform — Conflict Detection, Cost Tracking, Audit Logging.**
 
-[![Tests](https://img.shields.io/badge/tests-144%20passed-green)](https://github.com/Leo-Ayh-Oday/ahy-governance)
+[![Tests](https://img.shields.io/badge/tests-69%20passed-green)](https://github.com/Leo-Ayh-Oday/ahy-governance)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-purple)](LICENSE)
 
@@ -25,7 +25,11 @@ Ahy Governance solves all three.
   - Format mismatches: type errors in agent handoffs
   - Scope overlaps: agents duplicating work
   - Confidence clashes: high vs low confidence disagreements
-- [ ] **Cost Tracker** — per-agent dollar cost attribution (in progress)
+- [x] **Cost Tracker** — per-agent dollar cost attribution + budget circuit breaker
+  - 20+ model pricing table (OpenAI, Anthropic, DeepSeek, Google, Meta, Mistral, Qwen)
+  - Token → cost conversion, per-agent/session/model aggregation
+  - Budget limits with auto-block and 80% alert threshold
+  - CSV/JSON export, comprehensive cost reports
 - [ ] **Audit Reporter** — tamper-proof audit logs + compliance export
 
 ### Coming
