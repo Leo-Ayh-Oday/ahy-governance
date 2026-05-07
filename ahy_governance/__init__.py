@@ -54,7 +54,15 @@ from .prompt_guard import (
     sanitize_prompt,
 )
 
-__version__ = "0.6.0"
+from .memory_sharing import (
+    MemorySharing,
+    MemoryEntry,
+    get_memory_sharing,
+    shared_memory_write,
+    shared_memory_read,
+)
+
+__version__ = "0.7.0"
 __all__ = [
     # Conflict Detector
     "ConflictDetector",
@@ -100,4 +108,10 @@ __all__ = [
     "SanitizeResult",
     "get_guard",
     "sanitize_prompt",
+    # Memory Sharing
+    "MemorySharing",
+    "MemoryEntry",
+    "get_memory_sharing",
+    "shared_memory_write",
+    "shared_memory_read",
 ]
