@@ -2,16 +2,18 @@
 
 **Multi-Agent Governance Platform — Conflict Detection, Cost Tracking, Audit Logging, Health Monitoring.**
 
-[![Tests](https://img.shields.io/badge/tests-149%20passed-green)](https://github.com/Leo-Ayh-Oday/ahy-governance)
+[![Tests](https://img.shields.io/badge/tests-190%20passed-green)](https://github.com/Leo-Ayh-Oday/ahy-governance)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-purple)](LICENSE)
 
-When you deploy 10+ AI agents, three things always break:
+When you deploy 10+ AI agents, five things always break:
 1. **Agents contradict each other** — Agent A says "low risk", Agent B says "critical"
 2. **You have no idea what they cost** — token bills arrive blind
 3. **Nobody audited what they did** — compliance nightmare
+4. **Agents fail silently** — no heartbeat, no alert, pipeline broken
+5. **No access control** — who can deploy agents? who can see data?
 
-Ahy Governance solves all three.
+Ahy Governance solves all five.
 
 ---
 
@@ -26,7 +28,7 @@ Ahy Governance solves all three.
 
 ### Phase 1 — Enterprise Ready (In Progress)
 
-- [ ] **RBAC + API Key 管理** — 三级权限、多租户隔离
+- [x] **RBAC + API Key 管理** — 三级权限、密钥生命周期、多租户隔离 (41 tests)
 - [ ] **Prompt Guard** — 注入检测、敏感数据脱敏
 - [ ] **Memory Sharing** — Agent 间共享记忆池
 - [ ] **MCP Connectors** — 飞书/企微/金蝶
