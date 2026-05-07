@@ -21,8 +21,15 @@ from .cost_tracker import (
     get_tracker,
     DEFAULT_PRICING,
 )
+from .audit_logger import (
+    AuditReporter,
+    AuditEntry,
+    AuditEventType,
+    get_auditor,
+    log_audit,
+)
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = [
     # Conflict Detector
     "ConflictDetector",
@@ -40,4 +47,10 @@ __all__ = [
     "track_cost",
     "get_tracker",
     "DEFAULT_PRICING",
+    # Audit Reporter
+    "AuditReporter",
+    "AuditEntry",
+    "AuditEventType",
+    "get_auditor",
+    "log_audit",
 ]

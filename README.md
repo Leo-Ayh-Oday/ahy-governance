@@ -2,7 +2,7 @@
 
 **Multi-Agent Governance Platform — Conflict Detection, Cost Tracking, Audit Logging.**
 
-[![Tests](https://img.shields.io/badge/tests-69%20passed-green)](https://github.com/Leo-Ayh-Oday/ahy-governance)
+[![Tests](https://img.shields.io/badge/tests-104%20passed-green)](https://github.com/Leo-Ayh-Oday/ahy-governance)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-purple)](LICENSE)
 
@@ -30,7 +30,11 @@ Ahy Governance solves all three.
   - Token → cost conversion, per-agent/session/model aggregation
   - Budget limits with auto-block and 80% alert threshold
   - CSV/JSON export, comprehensive cost reports
-- [ ] **Audit Reporter** — tamper-proof audit logs + compliance export
+- [x] **Audit Reporter** — tamper-proof append-only audit logs + compliance export
+  - SHA-256 hash chain for non-repudiation and tamper detection
+  - SOC2 + ISO27001 compliance reports (Annex A controls mapping)
+  - Multi-dimension query: agent / session / event_type / recency
+  - 16 event types covering full agent and pipeline lifecycle
 
 ### Coming
 - Agent Health Dashboard (P50/P95/P99 latency, error rates, heartbeats)
