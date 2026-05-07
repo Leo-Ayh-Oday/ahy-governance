@@ -1,0 +1,387 @@
+"""
+Health Monitor — Agent 健康仪表盘
+
+特性:
+  心跳监控 + 超时告警
+  延迟百分位（P50/P95/P99）
+  错误率 / 成功率 / 重试次数追踪
+  Pipeline DAG 执行状态可视化
+  综合 Dashboard 数据导出
+
+用法:
+  monitor = HealthMonitor()
+  monitor.heartbeat("Planner", "ok", latency_ms=120)
+  monitor.record_call("Planner", success=True, latency_ms=120)
+  health = monitor.get_agent_health("Planner")
+  dashboard = monitor.get_dashboard_data()
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+
+
+# ── Enums ───────────────────────────────────────────────────────
+
+class AgentStatus(Enum):
+    HEALTHY = "healthy"          # success >= 95%, p95 < 60s, heartbeat < 30s
+    DEGRADED = "degraded"        # success >= 80%, p95 < 300s, heartbeat < 120s
+    UNHEALTHY = "unhealthy"      # below degraded thresholds
+    OFFLINE = "offline"           # no heartbeat for 300s+
+
+
+# ── Data classes ────────────────────────────────────────────────
+
+@dataclass
+class Heartbeat:
+    agent_name: str
+    status: str           # "ok", "timeout", "error"
+    latency_ms: float
+    timestamp: str
+
+
+@dataclass
+class AgentMetrics:
+    agent_name: str
+    success_count: int = 0
+    error_count: int = 0
+    retry_count: int = 0
+    total_calls: int = 0
+    latencies: list[float] = field(default_factory=list)
+    last_heartbeat: str = ""
+    status: AgentStatus = AgentStatus.OFFLINE
+
+    @property
+    def success_rate(self) -> float:
+        if self.total_calls == 0:
+            return 1.0
+        return round(self.success_count / self.total_calls, 4)
+
+    @property
+    def error_rate(self) -> float:
+        if self.total_calls == 0:
+            return 0.0
+        return round(self.error_count / self.total_calls, 4)
+
+    def to_dict(self) -> dict:
+        return {
+            "agent_name": self.agent_name,
+            "status": self.status.value,
+            "success_count": self.success_count,
+            "error_count": self.error_count,
+            "retry_count": self.retry_count,
+            "total_calls": self.total_calls,
+            "success_rate": self.success_rate,
+            "error_rate": self.error_rate,
+            "latency_p50": _percentile(self.latencies, 50) if self.latencies else 0,
+            "latency_p95": _percentile(self.latencies, 95) if self.latencies else 0,
+            "latency_p99": _percentile(self.latencies, 99) if self.latencies else 0,
+            "last_heartbeat": self.last_heartbeat,
+        }
+
+
+@dataclass
+class StepTiming:
+    step_id: str
+    agent_name: str
+    status: str = "pending"   # pending, running, done, error
+    duration_ms: float = 0
+    start_time: str = ""
+    end_time: str = ""
+
+
+@dataclass
+class PipelineRun:
+    pipeline_id: str
+    steps: dict[str, StepTiming] = field(default_factory=dict)
+    status: str = "running"    # running, success, failed, blocked
+    start_time: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    end_time: str = ""
+
+
+# ── Helpers ─────────────────────────────────────────────────────
+
+def _percentile(sorted_values: list[float], pct: int) -> float:
+    if not sorted_values:
+        return 0
+    import math
+    idx = max(0, int(math.ceil(len(sorted_values) * pct / 100)) - 1)
+    return sorted_values[idx]
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+# Default thresholds for status derivation (seconds)
+OFFLINE_THRESHOLD = 300
+UNHEALTHY_HEARTBEAT = 120
+DEGRADED_HEARTBEAT = 30
+UNHEALTHY_ERROR_RATE = 0.50
+DEGRADED_ERROR_RATE = 0.05
+UNHEALTHY_P95_LATENCY = 300.0
+DEGRADED_P95_LATENCY = 60.0
+
+
+# ── HealthMonitor ───────────────────────────────────────────────
+
+class HealthMonitor:
+    def __init__(self):
+        self._heartbeats: dict[str, Heartbeat] = {}
+        self._calls: dict[str, list[dict]] = {}
+        self._pipeline_runs: dict[str, PipelineRun] = {}
+
+    # ── Heartbeat ─────────────────────────────────────────────
+
+    def heartbeat(self, agent_name: str, status: str, latency_ms: float) -> Heartbeat:
+        hb = Heartbeat(
+            agent_name=agent_name, status=status,
+            latency_ms=latency_ms, timestamp=_utc_now(),
+        )
+        self._heartbeats[agent_name] = hb
+        return hb
+
+    # ── Record Call ───────────────────────────────────────────
+
+    def record_call(
+        self, agent_name: str, success: bool, latency_ms: float,
+        session_id: str = "",
+    ):
+        if agent_name not in self._calls:
+            self._calls[agent_name] = []
+        self._calls[agent_name].append({
+            "success": success,
+            "latency_ms": latency_ms,
+            "session_id": session_id,
+        })
+
+    # ── Agent Health ──────────────────────────────────────────
+
+    def get_agent_health(self, agent_name: str) -> AgentMetrics | None:
+        calls = self._calls.get(agent_name, [])
+        hb = self._heartbeats.get(agent_name)
+
+        if not calls and not hb:
+            return None
+
+        success = sum(1 for c in calls if c["success"])
+        errors = sum(1 for c in calls if not c["success"])
+        retries = errors  # each error is a potential retry
+        latencies = sorted([c["latency_ms"] for c in calls])
+
+        metrics = AgentMetrics(
+            agent_name=agent_name,
+            success_count=success,
+            error_count=errors,
+            retry_count=retries,
+            total_calls=len(calls),
+            latencies=latencies,
+            last_heartbeat=hb.timestamp if hb else "",
+        )
+        metrics.status = self._derive_status(metrics)
+        return metrics
+
+    def get_all_health(self) -> dict[str, AgentMetrics]:
+        agents = set(self._heartbeats.keys()) | set(self._calls.keys())
+        result = {}
+        for name in agents:
+            m = self.get_agent_health(name)
+            if m:
+                result[name] = m
+        return result
+
+    def _derive_status(self, metrics: AgentMetrics) -> AgentStatus:
+        now = datetime.now(timezone.utc)
+        hb_age = float("inf")
+
+        if metrics.last_heartbeat:
+            try:
+                hb_dt = datetime.fromisoformat(metrics.last_heartbeat)
+                hb_age = (now - hb_dt).total_seconds()
+            except (ValueError, TypeError):
+                pass
+
+        if hb_age > OFFLINE_THRESHOLD:
+            return AgentStatus.OFFLINE
+
+        p95 = _percentile(metrics.latencies, 95) if metrics.latencies else 0
+        err = metrics.error_rate
+
+        if (
+            err > UNHEALTHY_ERROR_RATE
+            or p95 > UNHEALTHY_P95_LATENCY
+            or hb_age > UNHEALTHY_HEARTBEAT
+        ):
+            return AgentStatus.UNHEALTHY
+
+        if (
+            err > DEGRADED_ERROR_RATE
+            or p95 > DEGRADED_P95_LATENCY
+            or hb_age > DEGRADED_HEARTBEAT
+        ):
+            return AgentStatus.DEGRADED
+
+        return AgentStatus.HEALTHY
+
+    # ── Latency Percentiles ───────────────────────────────────
+
+    def get_latency_percentiles(self, agent_name: str) -> dict:
+        calls = self._calls.get(agent_name, [])
+        latencies = sorted([c["latency_ms"] for c in calls])
+        return {
+            "p50": _percentile(latencies, 50),
+            "p95": _percentile(latencies, 95),
+            "p99": _percentile(latencies, 99),
+        }
+
+    # ── Rates ─────────────────────────────────────────────────
+
+    def get_success_rate(self, agent_name: str) -> float:
+        m = self.get_agent_health(agent_name)
+        return m.success_rate if m else 1.0
+
+    def get_error_rate(self, agent_name: str) -> float:
+        m = self.get_agent_health(agent_name)
+        return m.error_rate if m else 0.0
+
+    # ── Timeout Detection ─────────────────────────────────────
+
+    def check_timeout(self, agent_name: str, max_age_seconds: float = 60) -> bool:
+        hb = self._heartbeats.get(agent_name)
+        if hb is None:
+            return True
+        try:
+            hb_dt = datetime.fromisoformat(hb.timestamp)
+            age = (datetime.now(timezone.utc) - hb_dt).total_seconds()
+            return age > max_age_seconds
+        except (ValueError, TypeError):
+            return True
+
+    # ── Unhealthy Agents ──────────────────────────────────────
+
+    def get_unhealthy_agents(self) -> list[AgentMetrics]:
+        all_h = self.get_all_health()
+        return [
+            m for m in all_h.values()
+            if m.status in (AgentStatus.UNHEALTHY, AgentStatus.OFFLINE)
+        ]
+
+    # ── Pipeline DAG ──────────────────────────────────────────
+
+    def track_pipeline(self, pipeline_id: str, dag: dict) -> PipelineRun:
+        steps = {}
+        for step in dag.get("steps", []):
+            sid = step["id"]
+            steps[sid] = StepTiming(
+                step_id=sid, agent_name=step.get("agent", ""),
+                start_time=_utc_now(),
+            )
+        run = PipelineRun(pipeline_id=pipeline_id, steps=steps)
+        self._pipeline_runs[pipeline_id] = run
+        return run
+
+    def update_step(
+        self, pipeline_id: str, step_id: str,
+        status: str, duration_ms: float,
+    ):
+        run = self._pipeline_runs.get(pipeline_id)
+        if run and step_id in run.steps:
+            s = run.steps[step_id]
+            s.status = status
+            s.duration_ms = duration_ms
+            s.end_time = _utc_now()
+
+    def complete_pipeline(self, pipeline_id: str, status: str):
+        run = self._pipeline_runs.get(pipeline_id)
+        if run:
+            run.status = status
+            run.end_time = _utc_now()
+
+    def get_dag_status(self, pipeline_id: str) -> dict | None:
+        run = self._pipeline_runs.get(pipeline_id)
+        if run is None:
+            return None
+        return {
+            "pipeline_id": run.pipeline_id,
+            "status": run.status,
+            "start_time": run.start_time,
+            "end_time": run.end_time,
+            "steps": [
+                {
+                    "step_id": s.step_id,
+                    "agent": s.agent_name,
+                    "status": s.status,
+                    "duration_ms": s.duration_ms,
+                }
+                for s in run.steps.values()
+            ],
+        }
+
+    # ── Dashboard ─────────────────────────────────────────────
+
+    def get_dashboard_data(self) -> dict:
+        agents_data = []
+        all_h = self.get_all_health()
+        healthy = 0
+        unhealthy = 0
+        total_calls = 0
+
+        for m in all_h.values():
+            d = m.to_dict()
+            agents_data.append(d)
+            if m.status == AgentStatus.HEALTHY:
+                healthy += 1
+            elif m.status in (AgentStatus.UNHEALTHY, AgentStatus.OFFLINE):
+                unhealthy += 1
+            total_calls += m.total_calls
+
+        # Overall status
+        if unhealthy > 0:
+            overall = "unhealthy"
+        elif healthy < len(all_h):
+            overall = "degraded"
+        elif len(all_h) == 0:
+            overall = "unknown"
+        else:
+            overall = "healthy"
+
+        return {
+            "overall_status": overall,
+            "timestamp": _utc_now(),
+            "summary": {
+                "total_agents": len(all_h),
+                "healthy_count": healthy,
+                "degraded_count": len(all_h) - healthy - unhealthy,
+                "unhealthy_count": unhealthy,
+                "total_calls": total_calls,
+            },
+            "agents": agents_data,
+            "pipelines": [
+                self.get_dag_status(pid) for pid in self._pipeline_runs
+            ],
+        }
+
+    # ── Admin ─────────────────────────────────────────────────
+
+    def reset(self):
+        self._heartbeats.clear()
+        self._calls.clear()
+        self._pipeline_runs.clear()
+
+
+# ── Module-level convenience ────────────────────────────────────
+
+_monitor: HealthMonitor | None = None
+
+
+def get_monitor() -> HealthMonitor:
+    global _monitor
+    if _monitor is None:
+        _monitor = HealthMonitor()
+    return _monitor
+
+
+def check_health(agent_name: str) -> AgentMetrics | None:
+    return get_monitor().get_agent_health(agent_name)

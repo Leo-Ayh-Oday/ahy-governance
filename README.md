@@ -1,8 +1,8 @@
 # Ahy Governance
 
-**Multi-Agent Governance Platform — Conflict Detection, Cost Tracking, Audit Logging.**
+**Multi-Agent Governance Platform — Conflict Detection, Cost Tracking, Audit Logging, Health Monitoring.**
 
-[![Tests](https://img.shields.io/badge/tests-104%20passed-green)](https://github.com/Leo-Ayh-Oday/ahy-governance)
+[![Tests](https://img.shields.io/badge/tests-149%20passed-green)](https://github.com/Leo-Ayh-Oday/ahy-governance)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-purple)](LICENSE)
 
@@ -17,30 +17,19 @@ Ahy Governance solves all three.
 
 ## Features
 
-### Phase 0 — MVP (In Progress)
+### Phase 0 — MVP (Complete)
 
-- [x] **Conflict Detector** — 5 conflict types across agent outputs
-  - Fact conflicts: two agents state contradictory data
-  - Dependency breaks: downstream agent missing upstream fields
-  - Format mismatches: type errors in agent handoffs
-  - Scope overlaps: agents duplicating work
-  - Confidence clashes: high vs low confidence disagreements
-- [x] **Cost Tracker** — per-agent dollar cost attribution + budget circuit breaker
-  - 20+ model pricing table (OpenAI, Anthropic, DeepSeek, Google, Meta, Mistral, Qwen)
-  - Token → cost conversion, per-agent/session/model aggregation
-  - Budget limits with auto-block and 80% alert threshold
-  - CSV/JSON export, comprehensive cost reports
-- [x] **Audit Reporter** — tamper-proof append-only audit logs + compliance export
-  - SHA-256 hash chain for non-repudiation and tamper detection
-  - SOC2 + ISO27001 compliance reports (Annex A controls mapping)
-  - Multi-dimension query: agent / session / event_type / recency
-  - 16 event types covering full agent and pipeline lifecycle
+- [x] **Conflict Detector** — 5 conflict types (23 tests)
+- [x] **Cost Tracker** — 20+ model pricing, budget circuit breaker (46 tests)
+- [x] **Audit Reporter** — SHA-256 hash chain, SOC2/ISO27001 export (35 tests)
+- [x] **Health Monitor** — Heartbeats, P50-P99 latency, error rates, DAG viz (45 tests)
 
-### Coming
-- Agent Health Dashboard (P50/P95/P99 latency, error rates, heartbeats)
-- RBAC + Multi-tenant workspaces
-- Prompt Injection Guard
-- Cross-Agent Memory Sharing
+### Phase 1 — Enterprise Ready (In Progress)
+
+- [ ] **RBAC + API Key 管理** — 三级权限、多租户隔离
+- [ ] **Prompt Guard** — 注入检测、敏感数据脱敏
+- [ ] **Memory Sharing** — Agent 间共享记忆池
+- [ ] **MCP Connectors** — 飞书/企微/金蝶
 
 ---
 
