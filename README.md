@@ -1,8 +1,8 @@
 # Ahy Governance
 
-**Multi-Agent Governance Platform — Conflict Detection, Cost Tracking, Audit Logging, Health Monitoring.**
+**Multi-Agent Governance Platform — 7 modules, 263 tests, pip install ready.**
 
-[![Tests](https://img.shields.io/badge/tests-229%20passed-green)](https://github.com/Leo-Ayh-Oday/ahy-governance)
+[![Tests](https://img.shields.io/badge/tests-263%20passed-green)](https://github.com/Leo-Ayh-Oday/ahy-governance)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-purple)](LICENSE)
 
@@ -27,12 +27,15 @@ Ahy Governance solves all six.
 - [x] **Audit Reporter** — SHA-256 hash chain, SOC2/ISO27001 export (35 tests)
 - [x] **Health Monitor** — Heartbeats, P50-P99 latency, error rates, DAG viz (45 tests)
 
-### Phase 1 — Enterprise Ready (In Progress)
+### Phase 1 — Enterprise Ready (Complete)
 
 - [x] **RBAC + API Key 管理** — 三级权限、密钥生命周期、多租户隔离 (41 tests)
 - [x] **Prompt Guard** — 注入检测、PII脱敏, sanitize管道 (39 tests)
-- [ ] **Memory Sharing** — Agent 间共享记忆池
-- [ ] **MCP Connectors** — 飞书/企微/金蝶
+
+### Phase 2 — Moat + Hooks (Complete)
+
+- [x] **Memory Sharing** — Namespace隔离、TTL过期、标签搜索 (34 tests)
+- [ ] **MCP Connectors** — 飞书/企微/金蝶 MCP Server (独立 repo，开源钩子)
 
 ---
 
