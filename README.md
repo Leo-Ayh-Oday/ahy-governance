@@ -128,15 +128,18 @@ ahy-dashboard
 
 ## Pricing
 
+**Per-Agent pricing** — pay for agents you govern, not human seats. One 20-person team managing 50 agents pays for 50 agents, not 20 seats.
+
 | Tier | Price | Agents | Includes |
 |------|-------|--------|----------|
 | Community | Free | 1 | All 7 modules, local deployment |
-| Pro | $99/mo | 10 | Conflict detection, cost tracking, email support |
-| Team | $299/mo | 50 | RBAC, audit reports, SSO, priority support |
-| Enterprise | $999/mo | Unlimited | Private deployment, SLA, dedicated support |
+| Pro | $149/mo | 10 | Conflict detection, cost tracking, email support |
+| Team | $499/mo | 50 | RBAC, audit reports, priority support |
+| Enterprise | Contact Us | Unlimited | SSO/SAML, private deployment, SLA, dedicated support |
 
-**MCP Connector consulting:** ¥50K-100K/project  
-**Agent template packs:** $49/set on Gumroad
+**SOC 2 Compliance Pack:** +$299/mo — automated SOC 2 / ISO 27001 audit report generation. Available on any paid tier.
+
+**Agent Governance Integration Package:** ¥80K–150K per engagement — MCP connector development, private deployment, custom rule configuration.
 
 ---
 
