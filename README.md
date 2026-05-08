@@ -178,9 +178,9 @@ For companies facing their first AI compliance audit: this turns a 2-week manual
 
 ## Community
 
-- **Discord**: [Join our server](https://discord.gg/your-invite-link) — questions, feedback, early access
+- **Discussions**: [GitHub Discussions](https://github.com/Leo-Ayh-Oday/ahy-governance/discussions) — questions, ideas, feedback
 - **Issues**: [GitHub Issues](https://github.com/Leo-Ayh-Oday/ahy-governance/issues) — bug reports, feature requests
-- **Stars help**: If this project is useful, a GitHub star helps others discover it
+- **Star the repo**: If this is useful, a star helps others discover it
 
 ---
 
