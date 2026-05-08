@@ -2,6 +2,8 @@
 
 **The first multi-agent governance platform. Conflict detection, cost tracking, audit logging, health monitoring — 7 modules, 312 tests, production-ready.**
 
+[中文文档](README_CN.md)
+
 [![Tests](https://img.shields.io/badge/tests-312%20passed-green)](https://github.com/Leo-Ayh-Oday/ahy-governance/actions)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-purple)](LICENSE)
