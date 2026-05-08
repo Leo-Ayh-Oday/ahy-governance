@@ -36,6 +36,17 @@ When you deploy 10+ AI agents, five things break — Ahy Governance fixes all of
 
 ---
 
+## Who Is This For?
+
+- You're building agents with LangChain/CrewAI, and your boss asks "is this secure?" — you have no monitoring dashboard
+- Your compliance audit is due, and the auditor demands traceable decision logs for every agent
+- You manage 20+ agents but have no idea what each one costs, or whether their outputs contradict each other
+- You need SOC 2 / ISO 27001 evidence for your AI systems, and spreadsheets won't cut it
+
+If any of these hit close — **you're the exact user we built this for.**
+
+---
+
 ## Quick Start
 
 ```bash
@@ -126,6 +137,18 @@ ahy-dashboard
 
 ---
 
+## SOC 2 / ISO 27001 Compliance
+
+The **Audit Reporter** module is the most commercially valuable piece of this platform. It doesn't just log — it produces compliance-ready evidence:
+
+- **SHA-256 hash chain** — every audit entry is cryptographically linked to its predecessor. Tamper with one entry, the entire chain fails verification.
+- **SOC 2 export** — one-click report covering Security, Availability, Confidentiality, Processing Integrity, and Privacy control domains
+- **ISO 27001 export** — Annex A controls (A.9, A.10, A.12, A.16, A.18) with compliant/needs-review status per control
+
+For companies facing their first AI compliance audit: this turns a 2-week manual evidence-gathering process into a 5-minute export. **SOC 2 Compliance Pack available as a +$299/mo add-on on any paid tier.**
+
+---
+
 ## Pricing
 
 **Per-Agent pricing** — pay for agents you govern, not human seats. One 20-person team managing 50 agents pays for 50 agents, not 20 seats.
@@ -150,6 +173,14 @@ ahy-dashboard
 | [Kingdee MCP Server](https://github.com/Leo-Ayh-Oday/kingdee-mcp-server) | AI Agent ↔ 金蝶云星空 ERP | ✅ MIT |
 | [WeCom MCP Server](https://github.com/Leo-Ayh-Oday/wecom-mcp-server) | AI Agent ↔ 企业微信 | ✅ MIT |
 | [Ahy Agent](https://github.com/Leo-Ayh-Oday/ahy-agent) | Multi-agent orchestration harness | v0.6.0 |
+
+---
+
+## Community
+
+- **Discord**: [Join our server](https://discord.gg/your-invite-link) — questions, feedback, early access
+- **Issues**: [GitHub Issues](https://github.com/Leo-Ayh-Oday/ahy-governance/issues) — bug reports, feature requests
+- **Stars help**: If this project is useful, a GitHub star helps others discover it
 
 ---
 
