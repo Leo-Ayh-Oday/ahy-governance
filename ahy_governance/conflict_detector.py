@@ -22,15 +22,10 @@ Conflict Detector — 跨 Agent 输出冲突检测引擎
 """
 
 import json
-import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
-
-from .interfaces import ConflictDetector as ConflictDetectorABC, ConflictResult
-
-logger = logging.getLogger(__name__)
+from typing import Optional
 
 
 class ConflictType(Enum):
@@ -98,7 +93,7 @@ FACT_PATTERNS = [
 
 
 @dataclass
-class ConflictDetector(ConflictDetectorABC):
+class ConflictDetector:
     """跨 Agent 冲突检测器。
 
     在编排器每个 step 完成后调用 check()，传入当前所有 step_outputs。
@@ -107,13 +102,6 @@ class ConflictDetector(ConflictDetectorABC):
 
     fact_patterns: list[tuple] = field(default_factory=lambda: FACT_PATTERNS)
     strict_mode: bool = False  # True: 任何冲突都 CRITICAL
-
-    def name(self) -> str:
-        return "default"
-
-    def detect(self, agents: list, context: dict) -> list[ConflictResult]:
-        # Adapt the ABC interface to the existing check() internals
-        return self.check(context.get("step_outputs", {}), agents)
 
     def check(
         self,
@@ -488,256 +476,3 @@ def check_conflicts(
 
 
 # ── Module-level utilities ─────────────────────────────────────
-
-# ═══════════════════════════════════════════════════════════════════
-# Resolution & Arbitration (v1.1)
-# ═══════════════════════════════════════════════════════════════════
-
-class ConflictStatus(str, Enum):
-    OPEN = "open"
-    ACKNOWLEDGED = "acknowledged"
-    RESOLVED = "resolved"
-    DISMISSED = "dismissed"
-
-
-class ResolutionType(str, Enum):
-    AUTO = "auto"
-    MANUAL = "manual"
-    OVERRIDE = "override"
-
-
-class ArbitrationStrategy(str, Enum):
-    TRUST_WEIGHT = "trust_weight"
-    MAJORITY_VOTE = "majority_vote"
-    HIGHEST_CONFIDENCE = "highest_confidence"
-    MANUAL_ONLY = "manual_only"
-
-
-@dataclass
-class ArbitrationResult:
-    winner_agent: str
-    winner_value: str
-    confidence: float
-    strategy: ArbitrationStrategy
-    reasoning: str
-
-    def to_dict(self) -> dict:
-        return {
-            "winner_agent": self.winner_agent,
-            "winner_value": self.winner_value,
-            "confidence": self.confidence,
-            "strategy": self.strategy.value,
-            "reasoning": self.reasoning,
-        }
-
-
-@dataclass
-class ConflictArbiter:
-    """Resolves inter-agent conflicts using configurable arbitration strategies.
-
-    When two agents disagree on a fact, the arbiter decides which agent to trust
-    based on trust scores, confidence, and voting strategies.
-    """
-
-    strategy: ArbitrationStrategy = ArbitrationStrategy.HIGHEST_CONFIDENCE
-    _trust_cache: dict = field(default_factory=dict)
-
-    def arbitrate(self, conflicts: list[Conflict],
-                  agent_outputs: dict[str, dict] | None = None) -> list[ArbitrationResult]:
-        results = []
-        for c in conflicts:
-            if c.severity in (Severity.CRITICAL,):
-                results.append(ArbitrationResult(
-                    winner_agent="manual_required",
-                    winner_value="",
-                    confidence=0.0,
-                    strategy=ArbitrationStrategy.MANUAL_ONLY,
-                    reasoning=f"CRITICAL severity conflict — human review required: {c.description}",
-                ))
-                continue
-
-            result = self._arbitrate_one(c, agent_outputs or {})
-            results.append(result)
-        return results
-
-    def _arbitrate_one(self, conflict: Conflict, outputs: dict[str, dict]) -> ArbitrationResult:
-        agents = conflict.agents_involved
-
-        # Get trust weights
-        weights = {}
-        for a in agents:
-            t = self._trust_cache.get(a)
-            if t is not None:
-                weights[a] = t
-            elif outputs and a in outputs:
-                weights[a] = float(outputs[a].get("confidence", 0.5))
-            else:
-                weights[a] = 0.5
-
-        if self.strategy == ArbitrationStrategy.TRUST_WEIGHT:
-            return self._trust_weight_arbitrate(conflict, weights)
-        elif self.strategy == ArbitrationStrategy.HIGHEST_CONFIDENCE:
-            return self._confidence_arbitrate(conflict, weights)
-        elif self.strategy == ArbitrationStrategy.MAJORITY_VOTE:
-            return self._majority_arbitrate(conflict, weights)
-        else:
-            return ArbitrationResult(
-                winner_agent="manual_required", winner_value="",
-                confidence=0.0, strategy=ArbitrationStrategy.MANUAL_ONLY,
-                reasoning="Manual arbitration requested",
-            )
-
-    def _trust_weight_arbitrate(self, c: Conflict, weights: dict) -> ArbitrationResult:
-        best = max(weights, key=lambda a: weights[a])
-        score = weights[best]
-        evidence = dict(c.evidence) if c.evidence else {}
-        value = evidence.get(best, "")
-        return ArbitrationResult(
-            winner_agent=best, winner_value=str(value),
-            confidence=score, strategy=ArbitrationStrategy.TRUST_WEIGHT,
-            reasoning=f"Trust-weighted: {best} (score={score:.2f}) beats competition",
-        )
-
-    def _confidence_arbitrate(self, c: Conflict, weights: dict) -> ArbitrationResult:
-        best = max(weights, key=lambda a: weights[a])
-        score = weights[best]
-        evidence = dict(c.evidence) if c.evidence else {}
-        value = evidence.get(best, "")
-        return ArbitrationResult(
-            winner_agent=best, winner_value=str(value),
-            confidence=score, strategy=ArbitrationStrategy.HIGHEST_CONFIDENCE,
-            reasoning=f"Highest confidence: {best} (conf={score:.2f})",
-        )
-
-    def _majority_arbitrate(self, c: Conflict, weights: dict) -> ArbitrationResult:
-        if len(weights) < 2:
-            return self._confidence_arbitrate(c, weights)
-        sorted_agents = sorted(weights, key=lambda a: weights[a], reverse=True)
-        best = sorted_agents[0]
-        evidence = dict(c.evidence) if c.evidence else {}
-        value = evidence.get(best, "")
-        return ArbitrationResult(
-            winner_agent=best, winner_value=str(value),
-            confidence=weights[best], strategy=ArbitrationStrategy.MAJORITY_VOTE,
-            reasoning=f"Majority vote: {best} leads with score {weights[best]:.2f}",
-        )
-
-    def load_trust_scores(self, db=None, workspace_id: str = "") -> None:
-        if db is None:
-            return
-        rows = db.agent_trust_all(workspace_id)
-        for r in rows:
-            self._trust_cache[r["agent_name"]] = r["trust_score"]
-
-
-# ── DB-backed persistence methods ────────────────────────────────
-
-_db_ref: Any = None
-
-
-def set_database(db: Any) -> None:
-    """Wire the SQLite database for conflict persistence and arbitration."""
-    global _db_ref
-    _db_ref = db
-
-
-def get_db() -> Any:
-    return _db_ref
-
-
-def detect_and_persist(step_outputs: dict, dag: dict | None = None,
-                       workspace_id: str = "", strict: bool = False) -> list[Conflict]:
-    """Detect conflicts and persist them to DB. Triggers webhook for high+ severity."""
-    detector = get_detector(strict=strict)
-    conflicts = detector.check(step_outputs, dag)
-    db = get_db()
-    if db is None:
-        return conflicts
-    import json as _json
-    for c in conflicts:
-        db.conflict_insert(
-            conflict_type=c.conflict_type.value,
-            severity=c.severity.value,
-            agents_involved=_json.dumps(c.agents_involved),
-            description=c.description,
-            evidence=_json.dumps(c.evidence, ensure_ascii=False),
-            suggestion=c.suggestion,
-            detected_at=_utc_now_iso(),
-            workspace_id=workspace_id,
-        )
-        if c.severity in (Severity.HIGH, Severity.CRITICAL):
-            try:
-                from .webhook_alerts import get_alerter
-                get_alerter().send_conflict_detected(
-                    c.agents_involved, c.description, c.severity.value,
-                )
-            except Exception:
-                logger.warning("failed to send conflict alert", exc_info=True)
-    return conflicts
-
-
-def resolve_conflict(conflict_id: int, status: str, resolution_type: str,
-                     resolved_by: str, note: str = "",
-                     workspace_id: str = "") -> bool:
-    """Resolve a conflict and log the resolution to audit trail."""
-    db = get_db()
-    if db is None:
-        return False
-    row = db.conflict_get(conflict_id, workspace_id)
-    if row is None:
-        return False
-    db.conflict_update(conflict_id, workspace_id, status=status,
-                       resolution_type=resolution_type, resolved_by=resolved_by, note=note)
-    try:
-        from .audit_logger import get_auditor, AuditEventType
-        get_auditor().log_event(
-            event_type=AuditEventType.CONFLICT_RESOLVED,
-            agent_name=resolved_by,
-            details={
-                "conflict_id": conflict_id,
-                "status": status,
-                "resolution_type": resolution_type,
-                "note": note,
-            },
-            session_id=f"conflict-{conflict_id}",
-        )
-    except Exception:
-        logger.warning("failed to persist conflict audit entry", exc_info=True)
-    return True
-
-
-def get_conflict_stats(workspace_id: str = "") -> dict:
-    db = get_db()
-    if db is None:
-        return {"total": 0, "open": 0, "resolved_today": 0, "critical_open": 0}
-    return db.conflicts_stats(workspace_id)
-
-
-def get_open_conflicts(workspace_id: str = "", limit: int = 100) -> list[dict]:
-    db = get_db()
-    if db is None:
-        return []
-    return db.conflicts_by_status("open", workspace_id, limit=limit)
-
-
-def get_conflicts(workspace_id: str = "", status: str | None = None,
-                  conflict_type: str | None = None, severity: str | None = None,
-                  limit: int = 50, offset: int = 0) -> list[dict]:
-    db = get_db()
-    if db is None:
-        return []
-    if status:
-        return db.conflicts_by_status(status, workspace_id, limit, offset)
-    if conflict_type:
-        rows = db.conflicts_by_type(conflict_type, workspace_id)
-        return rows[offset:offset + limit]
-    if severity:
-        rows = db.conflicts_by_severity(severity, workspace_id)
-        return rows[offset:offset + limit]
-    rows = db.conflicts_all(workspace_id)
-    return rows[offset:offset + limit]
-
-
-def _utc_now_iso() -> str:
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).isoformat()

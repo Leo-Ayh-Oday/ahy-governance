@@ -18,14 +18,9 @@ Health Monitor — Agent 健康仪表盘
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .storage import Database
 
 
 # ── Enums ───────────────────────────────────────────────────────
@@ -108,11 +103,10 @@ class PipelineRun:
 
 # ── Helpers ─────────────────────────────────────────────────────
 
-def _percentile(values: list[float], pct: int) -> float:
-    if not values:
+def _percentile(sorted_values: list[float], pct: int) -> float:
+    if not sorted_values:
         return 0
     import math
-    sorted_values = sorted(values)
     idx = max(0, int(math.ceil(len(sorted_values) * pct / 100)) - 1)
     return sorted_values[idx]
 
@@ -134,35 +128,26 @@ DEGRADED_P95_LATENCY = 60.0
 # ── HealthMonitor ───────────────────────────────────────────────
 
 class HealthMonitor:
-    def __init__(self, db: Database | None = None):
-        self._db = db
+    def __init__(self):
         self._heartbeats: dict[str, Heartbeat] = {}
         self._calls: dict[str, list[dict]] = {}
         self._pipeline_runs: dict[str, PipelineRun] = {}
 
-    @property
-    def _use_db(self) -> bool:
-        return self._db is not None and self._db.enabled
-
     # ── Heartbeat ─────────────────────────────────────────────
 
-    def heartbeat(self, agent_name: str, status: str, latency_ms: float,
-                   workspace_id: str = "") -> Heartbeat:
-        ts = _utc_now()
+    def heartbeat(self, agent_name: str, status: str, latency_ms: float) -> Heartbeat:
         hb = Heartbeat(
             agent_name=agent_name, status=status,
-            latency_ms=latency_ms, timestamp=ts,
+            latency_ms=latency_ms, timestamp=_utc_now(),
         )
         self._heartbeats[agent_name] = hb
-        if self._use_db:
-            self._db.heartbeat_upsert(agent_name, status, latency_ms, ts, workspace_id)
         return hb
 
     # ── Record Call ───────────────────────────────────────────
 
     def record_call(
         self, agent_name: str, success: bool, latency_ms: float,
-        session_id: str = "", workspace_id: str = "",
+        session_id: str = "",
     ):
         if agent_name not in self._calls:
             self._calls[agent_name] = []
@@ -171,33 +156,10 @@ class HealthMonitor:
             "latency_ms": latency_ms,
             "session_id": session_id,
         })
-        if self._use_db:
-            self._db.call_insert(agent_name, success, latency_ms, session_id, _utc_now(), workspace_id)
 
     # ── Agent Health ──────────────────────────────────────────
 
-    def get_agent_health(self, agent_name: str, workspace_id: str = "") -> AgentMetrics | None:
-        if self._use_db:
-            hb_row = self._db.heartbeat_get(agent_name, workspace_id)
-            calls_list = self._db.calls_by_agent(agent_name, 500, workspace_id)
-            if not calls_list and not hb_row:
-                return None
-            success = self._db.calls_success_count(agent_name, workspace_id)
-            errors = self._db.calls_error_count(agent_name, workspace_id)
-            latencies = self._db.calls_latencies(agent_name, 500, workspace_id)
-            latencies.sort()
-            metrics = AgentMetrics(
-                agent_name=agent_name,
-                success_count=success,
-                error_count=errors,
-                retry_count=errors,
-                total_calls=success + errors,
-                latencies=latencies,
-                last_heartbeat=hb_row["timestamp"] if hb_row else "",
-            )
-            metrics.status = self._derive_status(metrics)
-            return metrics
-
+    def get_agent_health(self, agent_name: str) -> AgentMetrics | None:
         calls = self._calls.get(agent_name, [])
         hb = self._heartbeats.get(agent_name)
 
@@ -206,7 +168,7 @@ class HealthMonitor:
 
         success = sum(1 for c in calls if c["success"])
         errors = sum(1 for c in calls if not c["success"])
-        retries = errors
+        retries = errors  # each error is a potential retry
         latencies = sorted([c["latency_ms"] for c in calls])
 
         metrics = AgentMetrics(
@@ -221,25 +183,11 @@ class HealthMonitor:
         metrics.status = self._derive_status(metrics)
         return metrics
 
-    def get_all_health(self, workspace_id: str = "") -> dict[str, AgentMetrics]:
-        if self._use_db:
-            # Get all agents from DB + in-memory
-            agents = set()
-            for hb in self._db.heartbeat_all(workspace_id):
-                agents.add(hb["agent_name"])
-            for name in self._db.calls_all_agents(workspace_id):
-                agents.add(name)
-            result = {}
-            for name in agents:
-                m = self.get_agent_health(name, workspace_id)
-                if m:
-                    result[name] = m
-            return result
-
+    def get_all_health(self) -> dict[str, AgentMetrics]:
         agents = set(self._heartbeats.keys()) | set(self._calls.keys())
         result = {}
         for name in agents:
-            m = self.get_agent_health(name, workspace_id)
+            m = self.get_agent_health(name)
             if m:
                 result[name] = m
         return result
@@ -301,18 +249,11 @@ class HealthMonitor:
     # ── Timeout Detection ─────────────────────────────────────
 
     def check_timeout(self, agent_name: str, max_age_seconds: float = 60) -> bool:
-        hb_ts: str | None = None
-        if self._use_db:
-            row = self._db.heartbeat_get(agent_name, workspace_id)
-            hb_ts = row["timestamp"] if row else None
-        else:
-            hb = self._heartbeats.get(agent_name)
-            hb_ts = hb.timestamp if hb else None
-
-        if hb_ts is None:
+        hb = self._heartbeats.get(agent_name)
+        if hb is None:
             return True
         try:
-            hb_dt = datetime.fromisoformat(hb_ts)
+            hb_dt = datetime.fromisoformat(hb.timestamp)
             age = (datetime.now(timezone.utc) - hb_dt).total_seconds()
             return age > max_age_seconds
         except (ValueError, TypeError):
@@ -320,8 +261,8 @@ class HealthMonitor:
 
     # ── Unhealthy Agents ──────────────────────────────────────
 
-    def get_unhealthy_agents(self, workspace_id: str = "") -> list[AgentMetrics]:
-        all_h = self.get_all_health(workspace_id)
+    def get_unhealthy_agents(self) -> list[AgentMetrics]:
+        all_h = self.get_all_health()
         return [
             m for m in all_h.values()
             if m.status in (AgentStatus.UNHEALTHY, AgentStatus.OFFLINE)
@@ -331,20 +272,14 @@ class HealthMonitor:
 
     def track_pipeline(self, pipeline_id: str, dag: dict) -> PipelineRun:
         steps = {}
-        now = _utc_now()
         for step in dag.get("steps", []):
             sid = step["id"]
-            agent = step.get("agent", "")
             steps[sid] = StepTiming(
-                step_id=sid, agent_name=agent,
-                start_time=now,
+                step_id=sid, agent_name=step.get("agent", ""),
+                start_time=_utc_now(),
             )
-        run = PipelineRun(pipeline_id=pipeline_id, steps=steps, start_time=now)
+        run = PipelineRun(pipeline_id=pipeline_id, steps=steps)
         self._pipeline_runs[pipeline_id] = run
-        if self._use_db:
-            self._db.pipeline_insert(pipeline_id, "running", now)
-            for sid, s in steps.items():
-                self._db.pipeline_step_insert(pipeline_id, sid, s.agent_name)
         return run
 
     def update_step(
@@ -352,60 +287,17 @@ class HealthMonitor:
         status: str, duration_ms: float,
     ):
         run = self._pipeline_runs.get(pipeline_id)
-        now = _utc_now()
         if run and step_id in run.steps:
             s = run.steps[step_id]
             s.status = status
             s.duration_ms = duration_ms
-            s.end_time = now
-        if self._use_db:
-            self._db.pipeline_step_update(pipeline_id, step_id, status, duration_ms, now, now)
+            s.end_time = _utc_now()
 
     def complete_pipeline(self, pipeline_id: str, status: str):
         run = self._pipeline_runs.get(pipeline_id)
-        now = _utc_now()
         if run:
             run.status = status
-            run.end_time = now
-        if self._use_db:
-            self._db.pipeline_update(pipeline_id, status, now)
-
-    def get_dag_status(self, pipeline_id: str) -> dict | None:
-        if self._use_db:
-            p = self._db.pipeline_get(pipeline_id, workspace_id)
-            if p is None:
-                return None
-            steps = self._db.pipeline_steps_get(pipeline_id, workspace_id)
-            return {
-                "pipeline_id": p["pipeline_id"],
-                "status": p["status"],
-                "start_time": p["start_time"],
-                "end_time": p["end_time"],
-                "steps": [
-                    {"step_id": s["step_id"], "agent": s["agent_name"],
-                     "status": s["status"], "duration_ms": s["duration_ms"]}
-                    for s in steps
-                ],
-            }
-
-        run = self._pipeline_runs.get(pipeline_id)
-        if run is None:
-            return None
-        return {
-            "pipeline_id": run.pipeline_id,
-            "status": run.status,
-            "start_time": run.start_time,
-            "end_time": run.end_time,
-            "steps": [
-                {
-                    "step_id": s.step_id,
-                    "agent": s.agent_name,
-                    "status": s.status,
-                    "duration_ms": s.duration_ms,
-                }
-                for s in run.steps.values()
-            ],
-        }
+            run.end_time = _utc_now()
 
     def get_dag_status(self, pipeline_id: str) -> dict | None:
         run = self._pipeline_runs.get(pipeline_id)
@@ -429,73 +321,41 @@ class HealthMonitor:
 
     # ── Dashboard ─────────────────────────────────────────────
 
-    def get_dashboard_data(self, workspace_id: str = "") -> dict:
+    def get_dashboard_data(self) -> dict:
         agents_data = []
-        all_h = self.get_all_health(workspace_id)
+        all_h = self.get_all_health()
         healthy = 0
         unhealthy = 0
-        offline = 0
         total_calls = 0
-        total_success = 0
-        latency_p95s = []
 
         for m in all_h.values():
             d = m.to_dict()
             agents_data.append(d)
             if m.status == AgentStatus.HEALTHY:
                 healthy += 1
-            elif m.status == AgentStatus.OFFLINE:
-                offline += 1
-            elif m.status == AgentStatus.UNHEALTHY:
+            elif m.status in (AgentStatus.UNHEALTHY, AgentStatus.OFFLINE):
                 unhealthy += 1
             total_calls += m.total_calls
-            total_success += m.success_count
-            if m.latencies:
-                latency_p95s.append(_percentile(m.latencies, 95))
-
-        total_agents = len(all_h)
-        avg_latency_p95 = (sum(latency_p95s) / len(latency_p95s)) if latency_p95s else 0
-        system_success_rate = (total_success / total_calls * 100) if total_calls > 0 else 100.0
 
         # Overall status
-        if offline > 0 or unhealthy > 0:
+        if unhealthy > 0:
             overall = "unhealthy"
-        elif healthy < total_agents:
+        elif healthy < len(all_h):
             overall = "degraded"
-        elif total_agents == 0:
+        elif len(all_h) == 0:
             overall = "unknown"
         else:
             overall = "healthy"
-
-        degraded_count = total_agents - healthy - unhealthy - offline
 
         return {
             "overall_status": overall,
             "timestamp": _utc_now(),
             "summary": {
-                "total_agents": total_agents,
-                "healthy": healthy,
-                "degraded": degraded_count,
-                "offline": offline,
-                "unhealthy": unhealthy,
+                "total_agents": len(all_h),
+                "healthy_count": healthy,
+                "degraded_count": len(all_h) - healthy - unhealthy,
+                "unhealthy_count": unhealthy,
                 "total_calls": total_calls,
-                "average_latency_p95": round(avg_latency_p95, 1),
-                "system_success_rate": round(system_success_rate, 1),
-            },
-            "automation_stats": {
-                "conflicts_auto_resolved": self._get_auto_resolved_count(),
-                "description": self._get_automation_description(),
-                "time_saved_hours": round(total_agents * 0.5, 1),
-                "compliance_score": 96,
-            },
-            "quick_actions": [
-                {"label": "导出合规报告", "action": "export_compliance"},
-                {"label": "查看每日摘要", "action": "daily_summary"},
-            ],
-            "trends": {
-                "cost_trend": "stable",
-                "latency_trend": "stable",
-                "conflict_trend": "stable",
             },
             "agents": agents_data,
             "pipelines": [
@@ -503,54 +363,23 @@ class HealthMonitor:
             ],
         }
 
-    def _get_auto_resolved_count(self) -> int:
-        """Return count of auto-resolved conflicts from DB."""
-        if self._use_db:
-            try:
-                return self._db.conflicts_count_resolved("")
-            except Exception:
-                pass
-        return 0
-
-    def _get_automation_description(self) -> str:
-        count = self._get_auto_resolved_count()
-        if count == 0:
-            return "系统监控中，暂无自动处理记录"
-        return f"{count} 次潜在冲突已静默修复"
-
     # ── Admin ─────────────────────────────────────────────────
 
     def reset(self):
         self._heartbeats.clear()
         self._calls.clear()
         self._pipeline_runs.clear()
-        if self._use_db:
-            self._db.clear_all()
 
 
 # ── Module-level convenience ────────────────────────────────────
 
 _monitor: HealthMonitor | None = None
-_db: Database | None = None
-
-
-def set_database(db: Database | None):
-    global _db, _monitor
-    _db = db
-    _monitor = None  # force re-creation
 
 
 def get_monitor() -> HealthMonitor:
-    global _monitor, _db
+    global _monitor
     if _monitor is None:
-        if _db is None:
-            # Try env var lazy init
-            import os
-            db_path = os.environ.get("AHY_DB_PATH", "")
-            if db_path:
-                from .storage import Database
-                _db = Database(db_path)
-        _monitor = HealthMonitor(db=_db)
+        _monitor = HealthMonitor()
     return _monitor
 
 

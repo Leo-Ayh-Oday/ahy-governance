@@ -1,0 +1,6 @@
+exclude ahy_governance/compliance_reporter.py
+exclude ahy_governance/policy_engine.py
+exclude ahy_governance/webhook_alerts.py
+exclude ahy_governance/interfaces.py
+exclude ahy_governance/migration.py
+exclude ahy_governance/scaffold.py

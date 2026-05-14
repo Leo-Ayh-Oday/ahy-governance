@@ -19,15 +19,10 @@ RBAC + API Key 管理 — 三级权限/密钥生命周期/多租户隔离
 from __future__ import annotations
 
 import hashlib
-import os
 import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .storage import Database
 
 
 # ── Enums ───────────────────────────────────────────────────────
@@ -163,46 +158,12 @@ def _utc_now() -> str:
 # ── AccessManager ───────────────────────────────────────────────
 
 class AccessManager:
-    def __init__(self, db: Database | None = None):
-        self._db = db
+    def __init__(self):
         self._workspaces: dict[str, Workspace] = {}          # id → Workspace
         self._workspace_names: dict[str, str] = {}           # name → id
         self._users: dict[str, dict[str, User]] = {}         # workspace_id → {user_id → User}
         self._api_keys: dict[str, ApiKey] = {}               # key_id → ApiKey
         self._key_hashes: dict[str, str] = {}                # hash → key_id
-        # Hydrate from DB
-        if self._use_db:
-            for row in self._db.workspace_all():
-                ws = Workspace(workspace_id=row["workspace_id"], name=row["name"],
-                               owner_user_id=row["owner_user_id"], created_at=row["created_at"])
-                self._workspaces[ws.workspace_id] = ws
-                self._workspace_names[ws.name] = ws.workspace_id
-                self._users[ws.workspace_id] = {}
-            for row in self._db.workspace_all():
-                for u in self._db.rbac_users_by_workspace(row["workspace_id"]):
-                    user = User(user_id=u["user_id"], role=Role(u["role"]),
-                                workspace_id=u["workspace_id"], created_at=u["created_at"])
-                    self._users[u["workspace_id"]][u["user_id"]] = user
-            for row in self._db.apikeys_by_workspace("*"):
-                apikeys = self._db.apikeys_by_workspace(row["workspace_id"])
-                for k in apikeys:
-                    if not isinstance(k, dict):
-                        continue
-                break
-            # Load all non-revoked keys
-            if self._db:
-                for ws_row in self._db.workspace_all():
-                    for k in self._db.apikeys_by_workspace(ws_row["workspace_id"]):
-                        ak = ApiKey(key_id=k["key_id"], key_hash=k["key_hash"], name=k["name"],
-                                    role=Role(k["role"]), workspace_id=k["workspace_id"],
-                                    created_at=k["created_at"], expires_at=k["expires_at"],
-                                    revoked=bool(k["revoked"]), last_used=k["last_used"])
-                        self._api_keys[ak.key_id] = ak
-                        self._key_hashes[ak.key_hash] = ak.key_id
-
-    @property
-    def _use_db(self) -> bool:
-        return self._db is not None and self._db.enabled
 
     # ── Static helpers ────────────────────────────────────────
 
@@ -220,22 +181,13 @@ class AccessManager:
         if name in self._workspace_names:
             raise ValueError(f"Workspace '{name}' already exists")
         ws_id = _generate_workspace_id()
-        now = _utc_now()
-        ws = Workspace(workspace_id=ws_id, name=name, owner_user_id=owner_user_id, created_at=now)
+        ws = Workspace(workspace_id=ws_id, name=name, owner_user_id=owner_user_id)
         self._workspaces[ws_id] = ws
         self._workspace_names[name] = ws_id
         self._users[ws_id] = {}
-        if self._use_db:
-            self._db.workspace_insert(ws_id, name, owner_user_id, now)
         return ws
 
     def get_workspace(self, name_or_id: str) -> Workspace | None:
-        if self._use_db:
-            row = self._db.workspace_get(name_or_id)
-            if row:
-                return Workspace(workspace_id=row["workspace_id"], name=row["name"],
-                                 owner_user_id=row["owner_user_id"], created_at=row["created_at"])
-            return None
         if name_or_id in self._workspace_names:
             name_or_id = self._workspace_names[name_or_id]
         return self._workspaces.get(name_or_id)
@@ -246,13 +198,10 @@ class AccessManager:
     # ── Users ─────────────────────────────────────────────────
 
     def add_user(self, workspace_id: str, user_id: str, role: Role) -> User:
-        if workspace_id not in self._workspaces and not (self._use_db and self._db.workspace_get(workspace_id)):
+        if workspace_id not in self._workspaces:
             raise ValueError(f"Workspace not found: {workspace_id}")
-        now = _utc_now()
-        user = User(user_id=user_id, role=role, workspace_id=workspace_id, created_at=now)
-        self._users.setdefault(workspace_id, {})[user_id] = user
-        if self._use_db:
-            self._db.rbac_user_insert(user_id, workspace_id, role.value, now)
+        user = User(user_id=user_id, role=role, workspace_id=workspace_id)
+        self._users[workspace_id][user_id] = user
         return user
 
     def get_users(self, workspace_id: str) -> list[User]:
@@ -288,38 +237,17 @@ class AccessManager:
                 datetime.now(timezone.utc) + timedelta(days=expires_in_days)
             ).isoformat()
 
-        now = _utc_now()
         api_key = ApiKey(
             key_id=key_id, key_hash=key_hash, name=name,
             role=role, workspace_id=workspace_id,
-            created_at=now, expires_at=expires_at,
+            created_at=_utc_now(), expires_at=expires_at,
         )
         self._api_keys[key_id] = api_key
         self._key_hashes[key_hash] = key_id
-        if self._use_db:
-            self._db.apikey_insert(key_id, key_hash, name, role.value, workspace_id, now, expires_at)
         return api_key, raw
 
     def validate_api_key(self, raw: str) -> ApiKey | None:
         key_hash = _hash_key(raw)
-        now = _utc_now()
-        if self._use_db:
-            row = self._db.apikey_get_by_hash(key_hash)
-            if row is None or row["revoked"]:
-                return None
-            if row["expires_at"]:
-                try:
-                    exp = datetime.fromisoformat(row["expires_at"])
-                    if datetime.now(timezone.utc) > exp:
-                        return None
-                except (ValueError, TypeError):
-                    pass
-            self._db.apikey_update_last_used(key_hash, now)
-            return ApiKey(key_id=row["key_id"], key_hash=row["key_hash"], name=row["name"],
-                          role=Role(row["role"]), workspace_id=row["workspace_id"],
-                          created_at=row["created_at"], expires_at=row["expires_at"],
-                          revoked=bool(row["revoked"]), last_used=now)
-        # In-memory path
         key_id = self._key_hashes.get(key_hash)
         if key_id is None:
             return None
@@ -333,7 +261,7 @@ class AccessManager:
                     return None
             except (ValueError, TypeError):
                 pass
-        api_key.last_used = now
+        api_key.last_used = _utc_now()
         return api_key
 
     def revoke_api_key(self, key_id: str) -> bool:
@@ -341,8 +269,6 @@ class AccessManager:
         if api_key is None or api_key.revoked:
             return False
         api_key.revoked = True
-        if self._use_db:
-            self._db.apikey_revoke(key_id)
         return True
 
     def rotate_api_key(self, key_id: str) -> tuple[ApiKey, str] | None:
@@ -350,17 +276,11 @@ class AccessManager:
         if old is None or old.revoked:
             return None
         old.revoked = True
-        if self._use_db:
-            self._db.apikey_revoke(key_id)
-        return self.create_api_key(old.workspace_id, "", old.name, old.role)
+        return self.create_api_key(
+            old.workspace_id, "", old.name, old.role,
+        )
 
     def get_api_keys(self, workspace_id: str) -> list[ApiKey]:
-        if self._use_db:
-            rows = self._db.apikeys_by_workspace(workspace_id)
-            return [ApiKey(key_id=r["key_id"], key_hash=r["key_hash"], name=r["name"],
-                           role=Role(r["role"]), workspace_id=r["workspace_id"],
-                           created_at=r["created_at"], expires_at=r["expires_at"],
-                           revoked=bool(r["revoked"]), last_used=r["last_used"]) for r in rows]
         return [
             k for k in self._api_keys.values()
             if k.workspace_id == workspace_id and not k.revoked
@@ -382,29 +302,15 @@ class AccessManager:
         self._users.clear()
         self._api_keys.clear()
         self._key_hashes.clear()
-        if self._use_db:
-            self._db.clear_all()
 
 
 # ── Module-level convenience ────────────────────────────────────
 
 _access_manager: AccessManager | None = None
-_db: Database | None = None
-
-
-def set_database(db: Database | None):
-    global _db, _access_manager
-    _db = db
-    _access_manager = None
 
 
 def get_access_manager() -> AccessManager:
-    global _access_manager, _db
+    global _access_manager
     if _access_manager is None:
-        if _db is None:
-            db_path = os.environ.get("AHY_DB_PATH", "")
-            if db_path:
-                from .storage import Database
-                _db = Database(db_path)
-        _access_manager = AccessManager(db=_db)
+        _access_manager = AccessManager()
     return _access_manager

@@ -20,11 +20,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from .interfaces import CostTracker as CostTrackerABC
-from typing import Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .storage import Database
+from typing import Optional
 
 
 # ── Default pricing table (USD per 1M tokens) ──────────────────
@@ -114,9 +110,6 @@ class BudgetConfig:
     current_usd: float = 0.0
     alert_threshold: float = 0.8   # alert at 80%
     auto_block: bool = True        # raise BudgetExceededError when exceeded
-    anomaly_threshold_usd: float = 2.0     # single-call cost > this = anomaly
-    anomaly_threshold_tokens: int = 100_000  # single-call tokens > this = anomaly
-    anomaly_count: int = 0          # running count of anomalies detected
 
     @property
     def remaining(self) -> float:
@@ -144,50 +137,15 @@ class BudgetExceededError(Exception):
         )
 
 
-@dataclass
-class AnomalyEvent:
-    agent_name: str
-    model: str
-    cost_usd: float
-    tokens_total: int
-    reason: str  # e.g. "cost_spike", "token_spike"
-    session_id: str = ""
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-
 # ── Cost Tracker ────────────────────────────────────────────────
 
-class CostTracker(CostTrackerABC):
-    def __init__(self, db: Database | None = None):
-        self._db = db
+class CostTracker:
+    def __init__(self):
         self._entries: list[CostEntry] = []
-        self._anomalies: list[AnomalyEvent] = []
         self._budget: BudgetConfig | None = None
         self._pricing: dict[str, ModelPricing] = {
             p.model_id: p for p in DEFAULT_PRICING
         }
-        # Load pricing from DB if available
-        if self._use_db:
-            for row in self._db.pricing_all():
-                if row["model_id"] not in self._pricing:
-                    self._pricing[row["model_id"]] = ModelPricing(
-                        model_id=row["model_id"], provider=row["provider"],
-                        input_price_per_1m=row["input_price_per_1m"],
-                        output_price_per_1m=row["output_price_per_1m"],
-                        note=row["note"] or "",
-                    )
-            # Load budget from DB
-            b = self._db.budget_get()
-            if b:
-                self._budget = BudgetConfig(
-                    limit_usd=b["limit_usd"], period=b["period"],
-                    current_usd=b["current_usd"], alert_threshold=b["alert_threshold"],
-                    auto_block=bool(b["auto_block"]),
-                )
-
-    @property
-    def _use_db(self) -> bool:
-        return self._db is not None and self._db.enabled
 
     # ── Pricing ──────────────────────────────────────────────
 
@@ -206,8 +164,6 @@ class CostTracker(CostTrackerABC):
     ) -> ModelPricing:
         p = ModelPricing(model_id, provider, input_price_per_1m, output_price_per_1m)
         self._pricing[model_id] = p
-        if self._use_db:
-            self._db.pricing_upsert(model_id, provider, input_price_per_1m, output_price_per_1m, "")
         return p
 
     def estimate(self, model: str, tokens_in: int, tokens_out: int) -> float:
@@ -221,7 +177,7 @@ class CostTracker(CostTrackerABC):
 
     def track(
         self, agent_name: str, model: str, tokens_in: int,
-        tokens_out: int, session_id: str = "", workspace_id: str = "",
+        tokens_out: int, session_id: str = "",
     ) -> CostEntry:
         pricing = self.get_pricing(model)
         if pricing is None:
@@ -235,24 +191,6 @@ class CostTracker(CostTrackerABC):
             cost_usd=cost, session_id=session_id,
         )
         self._entries.append(entry)
-
-        # Anomaly detection — per-call check
-        if self._budget:
-            tokens_total = tokens_in + tokens_out
-            if cost > self._budget.anomaly_threshold_usd or tokens_total > self._budget.anomaly_threshold_tokens:
-                reason = "cost_spike" if cost > self._budget.anomaly_threshold_usd else "token_spike"
-                self._anomalies.append(AnomalyEvent(
-                    agent_name=agent_name, model=model,
-                    cost_usd=cost, tokens_total=tokens_total,
-                    reason=reason, session_id=session_id,
-                ))
-                self._budget.anomaly_count += 1
-
-        # Persist to DB
-        if self._use_db:
-            self._db.cost_insert(agent_name, model, tokens_in, tokens_out, cost, session_id, entry.timestamp, workspace_id)
-            if self._budget:
-                self._db.budget_update_current(cost, workspace_id)
 
         if self._budget:
             self._budget.current_usd = round(self._budget.current_usd + cost, 6)
@@ -293,90 +231,17 @@ class CostTracker(CostTrackerABC):
     def entry_count(self) -> int:
         return len(self._entries)
 
-    @property
-    def anomaly_count(self) -> int:
-        return self._budget.anomaly_count if self._budget else 0
-
-    def get_anomalies(self, limit: int = 20) -> list[dict]:
-        return [{
-            "agent_name": a.agent_name,
-            "model": a.model,
-            "cost_usd": a.cost_usd,
-            "tokens_total": a.tokens_total,
-            "reason": a.reason,
-            "session_id": a.session_id,
-            "timestamp": a.timestamp,
-        } for a in self._anomalies[-limit:]]
-
     # ── Budget ───────────────────────────────────────────────
 
     def set_budget(
         self, limit_usd: float, period: str = "monthly",
         alert_threshold: float = 0.8, auto_block: bool = True,
-        workspace_id: str = "",
     ) -> BudgetConfig:
         self._budget = BudgetConfig(
             limit_usd=limit_usd, period=period,
             alert_threshold=alert_threshold, auto_block=auto_block,
         )
-        if self._use_db:
-            self._db.budget_upsert(limit_usd, period, 0.0, alert_threshold, auto_block, workspace_id)
         return self._budget
-
-    def get_budget_status(self, workspace_id: str = "") -> dict | None:
-        if self._use_db:
-            b = self._db.budget_get(workspace_id)
-            if b:
-                return {
-                    "limit_usd": b["limit_usd"],
-                    "current_usd": b["current_usd"],
-                    "total_cost": b["current_usd"],
-                    "remaining_usd": round(b["limit_usd"] - b["current_usd"], 6),
-                    "usage_pct": round(b["current_usd"] / b["limit_usd"] * 100, 2) if b["limit_usd"] else 0,
-                    "period": b["period"],
-                    "alert_threshold": b.get("alert_threshold", 0.8),
-                    "auto_block": bool(b.get("auto_block", False)),
-                    "near_limit": b["current_usd"] / b["limit_usd"] >= b["alert_threshold"] if b["limit_usd"] else False,
-                    "anomaly_count": self.anomaly_count,
-                    "anomaly_threshold_usd": self._budget.anomaly_threshold_usd if self._budget else 2.0,
-                }
-        if self._budget is None:
-            return None
-        return {
-            "limit_usd": self._budget.limit_usd,
-            "current_usd": self._budget.current_usd,
-            "total_cost": self._budget.current_usd,
-            "remaining_usd": self._budget.remaining,
-            "usage_pct": self._budget.usage_pct,
-            "period": self._budget.period,
-            "alert_threshold": self._budget.alert_threshold,
-            "auto_block": self._budget.auto_block,
-            "near_limit": self._budget.near_limit,
-            "anomaly_count": self._budget.anomaly_count,
-            "anomaly_threshold_usd": self._budget.anomaly_threshold_usd,
-        }
-
-    # ── ABC interface methods ─────────────────────────────────
-
-    def name(self) -> str:
-        return "default"
-
-    def estimate_from_request(self, request: dict) -> float:
-        """ABC-compatible: estimate cost from a dict with model/tokens_in/tokens_out."""
-        return self.estimate(
-            model=request.get("model", "unknown"),
-            tokens_in=request.get("tokens_in", 0),
-            tokens_out=request.get("tokens_out", 0),
-        )
-
-    def should_throttle(self, agent_id: str, budget_limit: float) -> bool:
-        """Return True if the agent exceeds or is near budget limit."""
-        if self._budget is None:
-            return False
-        cost = self.get_agent_cost(agent_id)
-        return cost >= budget_limit * self._budget.alert_threshold
-
-    # ── Budget check ─────────────────────────────────────────
 
     def check_budget(self) -> float:
         """Return remaining budget. Raises BudgetExceededError if over limit."""
@@ -389,34 +254,25 @@ class CostTracker(CostTrackerABC):
             )
         return self._budget.remaining
 
+    def get_budget_status(self) -> dict | None:
+        if self._budget is None:
+            return None
+        return {
+            "limit_usd": self._budget.limit_usd,
+            "current_usd": self._budget.current_usd,
+            "remaining_usd": self._budget.remaining,
+            "usage_pct": self._budget.usage_pct,
+            "period": self._budget.period,
+            "near_limit": self._budget.near_limit,
+        }
+
     def reset_budget(self):
         self._budget = None
 
     # ── Report ───────────────────────────────────────────────
 
-    def get_report(self, workspace_id: str = "") -> dict:
+    def get_report(self) -> dict:
         """Comprehensive cost report by agent, session, and model."""
-        if self._use_db:
-            entries = self._db.cost_all(workspace_id)
-            by_agent: dict[str, float] = {}
-            by_session: dict[str, float] = {}
-            by_model: dict[str, float] = {}
-            for e in entries:
-                by_agent[e["agent_name"]] = round(by_agent.get(e["agent_name"], 0) + e["cost_usd"], 6)
-                if e["session_id"]:
-                    by_session[e["session_id"]] = round(by_session.get(e["session_id"], 0) + e["cost_usd"], 6)
-                by_model[e["model"]] = round(by_model.get(e["model"], 0) + e["cost_usd"], 6)
-            tokens = self._db.cost_token_totals(workspace_id)
-            return {
-                "total_cost_usd": self._db.cost_total_usd(workspace_id),
-                "total_entries": self._db.cost_count(workspace_id),
-                "tokens": tokens,
-                "by_agent": by_agent,
-                "by_session": by_session,
-                "by_model": by_model,
-                "budget": self.get_budget_status(workspace_id),
-            }
-
         by_agent: dict[str, float] = {}
         by_session: dict[str, float] = {}
         by_model: dict[str, float] = {}
@@ -460,31 +316,17 @@ class CostTracker(CostTrackerABC):
     def reset(self):
         self._entries.clear()
         self._budget = None
-        if self._use_db:
-            self._db.clear_all()
 
 
 # ── Module-level convenience ────────────────────────────────────
 
 _tracker: CostTracker | None = None
-_db: Database | None = None
-
-
-def set_database(db: Database | None):
-    global _db, _tracker
-    _db = db
-    _tracker = None
 
 
 def get_tracker() -> CostTracker:
-    global _tracker, _db
+    global _tracker
     if _tracker is None:
-        if _db is None:
-            db_path = os.environ.get("AHY_DB_PATH", "")
-            if db_path:
-                from .storage import Database
-                _db = Database(db_path)
-        _tracker = CostTracker(db=_db)
+        _tracker = CostTracker()
     return _tracker
 
 

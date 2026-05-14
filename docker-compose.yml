@@ -1,0 +1,52 @@
+# ── ahyops — AI Agent Governance Platform ──────────────────
+# One command deployment. No cloud dependency.
+#
+# Quick start (HTTP only):
+#   docker compose up -d
+#   # Dashboard at http://localhost
+#
+# With HTTPS (production):
+#   1. Put SSL certs in nginx/ssl/ (ahyops.cn.pem + ahyops.cn.key)
+#   2. docker compose up -d
+#   3. Dashboard at https://ahyops.cn
+#
+# For China server, set pip mirror in Dockerfile already done.
+
+version: "3.8"
+
+services:
+  ahyops:
+    build: .
+    container_name: ahyops
+    expose:
+      - "8080"
+    environment:
+      AHY_DB_PATH: /app/data/ahy_governance.db
+      UPSTREAM_OPENAI_BASE: https://api.deepseek.com
+    volumes:
+      - ahyops_backup:/app/data_backup
+    tmpfs:
+      - /app/data:size=512M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/proxy/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  nginx:
+    image: nginx:alpine
+    container_name: ahyops-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - ahyops
+    restart: unless-stopped
+
+volumes:
+  ahyops_backup:

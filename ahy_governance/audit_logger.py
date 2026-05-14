@@ -20,14 +20,9 @@ import csv
 import hashlib
 import json
 import os
-import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .storage import Database
 
 
 # ── Event Types ─────────────────────────────────────────────────
@@ -118,34 +113,15 @@ def _utc_now() -> str:
 # ── AuditReporter ───────────────────────────────────────────────
 
 class AuditReporter:
-    def __init__(self, db: Database | None = None):
-        self._db = db
+    def __init__(self):
         self._entries: list[AuditEntry] = []
-        # Hydrate from DB
-        if self._use_db:
-            for row in self._db.audit_all():
-                entry = AuditEntry(
-                    index=row["idx"],
-                    event_type=AuditEventType(row["event_type"]),
-                    agent_name=row["agent_name"],
-                    details=json.loads(row["details"]),
-                    session_id=row["session_id"],
-                    timestamp=row["timestamp"],
-                    hash=row["hash"],
-                    prev_hash=row["prev_hash"],
-                )
-                self._entries.append(entry)
-
-    @property
-    def _use_db(self) -> bool:
-        return self._db is not None and self._db.enabled
 
     # ── Logging ───────────────────────────────────────────────
 
     def log(
         self, event_type: AuditEventType, agent_name: str,
         details: dict | None = None, session_id: str = "",
-        timestamp: str | None = None, workspace_id: str = "",
+        timestamp: str | None = None,
     ) -> AuditEntry:
         details = details or {}
         index = len(self._entries)
@@ -168,19 +144,11 @@ class AuditReporter:
             hash=entry_hash, prev_hash=prev_hash,
         )
         self._entries.append(entry)
-
-        if self._use_db:
-            self._db.audit_insert(
-                index, event_type.value, agent_name,
-                json.dumps(details, ensure_ascii=False),
-                session_id, ts, entry_hash, prev_hash, workspace_id,
-            )
-
         return entry
 
     # ── Integrity ─────────────────────────────────────────────
 
-    def verify_integrity(self, workspace_id: str = "") -> bool:
+    def verify_integrity(self) -> bool:
         if not self._entries:
             return True
         prev = GENESIS_HASH
@@ -238,7 +206,7 @@ class AuditReporter:
             results = [e for e in results if e.session_id == session_id]
         return results
 
-    def recent(self, n: int = 20, workspace_id: str = "") -> list[AuditEntry]:
+    def recent(self, n: int = 20) -> list[AuditEntry]:
         if not self._entries:
             return []
         return list(reversed(self._entries[-n:]))
@@ -395,31 +363,17 @@ class AuditReporter:
 
     def reset(self):
         self._entries.clear()
-        if self._use_db:
-            self._db.clear_all()
 
 
 # ── Module-level convenience ────────────────────────────────────
 
 _auditor: AuditReporter | None = None
-_db: Database | None = None
-
-
-def set_database(db: Database | None):
-    global _db, _auditor
-    _db = db
-    _auditor = None
 
 
 def get_auditor() -> AuditReporter:
-    global _auditor, _db
+    global _auditor
     if _auditor is None:
-        if _db is None:
-            db_path = os.environ.get("AHY_DB_PATH", "")
-            if db_path:
-                from .storage import Database
-                _db = Database(db_path)
-        _auditor = AuditReporter(db=_db)
+        _auditor = AuditReporter()
     return _auditor
 
 

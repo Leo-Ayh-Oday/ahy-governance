@@ -17,14 +17,9 @@ Memory Sharing — 跨 Agent 共享记忆池
 
 from __future__ import annotations
 
-import json
-import os
 import time
 from dataclasses import dataclass, field
-from typing import Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .storage import Database
+from typing import Optional
 
 
 # ── Data classes ────────────────────────────────────────────────
@@ -63,13 +58,8 @@ class MemoryEntry:
 # ── MemorySharing ───────────────────────────────────────────────
 
 class MemorySharing:
-    def __init__(self, db: Database | None = None):
-        self._db = db
+    def __init__(self):
         self._store: dict[str, dict[str, MemoryEntry]] = {}  # namespace → {key → entry}
-
-    @property
-    def _use_db(self) -> bool:
-        return self._db is not None and self._db.enabled
 
     # ── Write ─────────────────────────────────────────────────
 
@@ -80,34 +70,17 @@ class MemorySharing:
     ) -> MemoryEntry:
         if namespace not in self._store:
             self._store[namespace] = {}
-        tags_list = tags or []
         entry = MemoryEntry(
             namespace=namespace, key=key, value=value,
-            source_agent=source_agent, tags=tags_list,
+            source_agent=source_agent, tags=tags or [],
             ttl_seconds=ttl_seconds,
         )
         self._store[namespace][key] = entry
-        if self._use_db:
-            self._db.memory_upsert(namespace, key, value, source_agent,
-                                   json.dumps(tags_list, ensure_ascii=False),
-                                   entry.created_at, ttl_seconds)
         return entry
 
     # ── Read ──────────────────────────────────────────────────
 
     def read(self, namespace: str, key: str) -> MemoryEntry | None:
-        if self._use_db:
-            row = self._db.memory_get(namespace, key)
-            if row is None:
-                return None
-            if row["ttl_seconds"] is not None and time.time() > row["created_at"] + row["ttl_seconds"]:
-                self._db.memory_delete(namespace, key)
-                return None
-            return MemoryEntry(namespace=row["namespace"], key=row["key"], value=row["value"],
-                               source_agent=row["source_agent"], tags=json.loads(row["tags"]),
-                               created_at=row["created_at"], ttl_seconds=row["ttl_seconds"],
-                               access_count=row["access_count"] + 1)
-        # In-memory path
         ns = self._store.get(namespace)
         if ns is None:
             return None
@@ -128,13 +101,6 @@ class MemorySharing:
         self, namespace: str, *, query: str = "",
         tags: list[str] | None = None,
     ) -> list[MemoryEntry]:
-        if self._use_db:
-            rows = self._db.memory_search(namespace, query, tags)
-            return [MemoryEntry(namespace=r["namespace"], key=r["key"], value=r["value"],
-                                source_agent=r["source_agent"], tags=json.loads(r["tags"]),
-                                created_at=r["created_at"], ttl_seconds=r["ttl_seconds"],
-                                access_count=r["access_count"]) for r in rows]
-
         namespaces = (
             list(self._store.keys()) if namespace == "*"
             else [namespace]
@@ -149,9 +115,11 @@ class MemorySharing:
                 if entry.expired:
                     del ns[entry.key]
                     continue
+                # Tag filter: entry must have ALL requested tags
                 if tags:
                     if not all(t in entry.tags for t in tags):
                         continue
+                # Query filter: substring match on key or value
                 if query:
                     if query not in entry.key and query not in entry.value:
                         continue
@@ -192,8 +160,6 @@ class MemorySharing:
     # ── Stats ─────────────────────────────────────────────────
 
     def get_stats(self) -> dict:
-        if self._use_db:
-            return self._db.memory_stats()
         self._gc_expired()
         total = 0
         by_ns: dict[str, int] = {}
@@ -228,31 +194,17 @@ class MemorySharing:
 
     def reset(self):
         self._store.clear()
-        if self._use_db:
-            self._db.clear_all()
 
 
 # ── Module-level convenience ────────────────────────────────────
 
 _memory_sharing: MemorySharing | None = None
-_db: Database | None = None
-
-
-def set_database(db: Database | None):
-    global _db, _memory_sharing
-    _db = db
-    _memory_sharing = None
 
 
 def get_memory_sharing() -> MemorySharing:
-    global _memory_sharing, _db
+    global _memory_sharing
     if _memory_sharing is None:
-        if _db is None:
-            db_path = os.environ.get("AHY_DB_PATH", "")
-            if db_path:
-                from .storage import Database
-                _db = Database(db_path)
-        _memory_sharing = MemorySharing(db=_db)
+        _memory_sharing = MemorySharing()
     return _memory_sharing
 
 

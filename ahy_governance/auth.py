@@ -18,34 +18,14 @@ import os
 import secrets
 import sqlite3
 import time
-from collections import defaultdict
 from base64 import urlsafe_b64encode
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
-
-
-# ── JWT Secret ────────────────────────────────────────────────────
-
-def _load_or_create_jwt_secret() -> str:
-    env_secret = os.environ.get("JWT_SECRET")
-    if env_secret:
-        return env_secret
-    secret_file = Path(os.environ.get(
-        "AHY_SECRET_DIR",
-        Path(__file__).resolve().parent / ".secrets"
-    )) / "jwt_secret"
-    if secret_file.exists():
-        return secret_file.read_text().strip()
-    secret_file.parent.mkdir(parents=True, exist_ok=True)
-    new_secret = secrets.token_hex(32)
-    secret_file.write_text(new_secret)
-    return new_secret
 
 
 # ── Constants ─────────────────────────────────────────────────────
 
-JWT_SECRET = _load_or_create_jwt_secret()
+JWT_SECRET = os.environ.get("JWT_SECRET", secrets.token_hex(32))
 JWT_EXPIRY = 7 * 24 * 3600  # 7 days
 API_KEY_PREFIX = "ahy_"
 
@@ -54,22 +34,13 @@ API_KEY_PREFIX = "ahy_"
 
 def _hash_password(password: str) -> str:
     salt = secrets.token_hex(16)
-    iterations = 100_000
-    h = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), iterations).hex()
-    return f"pbkdf2:{salt}:{iterations}:{h}"
+    h = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+    return f"{salt}:{h}"
 
 
 def _verify_password(password: str, stored: str) -> bool:
-    if stored.startswith("pbkdf2:"):
-        _, salt, iterations, h = stored.split(":", 3)
-        computed = hashlib.pbkdf2_hmac(
-            'sha256', password.encode(), salt.encode(), int(iterations)
-        ).hex()
-        return hmac.compare_digest(computed, h)
-    # Legacy SHA-256 format — verify and auto-upgrade
     salt, h = stored.split(":", 1)
-    expected = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
-    return hmac.compare_digest(expected, h)
+    return hashlib.sha256(f"{salt}:{password}".encode()).hexdigest() == h
 
 
 def _hash_key(key: str) -> str:
@@ -78,23 +49,6 @@ def _hash_key(key: str) -> str:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-# ── API Key Rate Limiter ───────────────────────────────────────────
-
-# In-memory sliding-window rate limit: 5 failed attempts per 60s per key hash
-_rate_limit_store: dict[str, list[float]] = defaultdict(list)
-
-
-def _check_api_key_rate_limit(key_hash: str, max_attempts: int = 5, window: int = 60) -> bool:
-    """Return True if the attempt is allowed, False if rate-limited."""
-    now = time.time()
-    attempts = _rate_limit_store[key_hash]
-    _rate_limit_store[key_hash] = [t for t in attempts if now - t < window]
-    if len(_rate_limit_store[key_hash]) >= max_attempts:
-        return False
-    _rate_limit_store[key_hash].append(now)
-    return True
 
 
 # ── JWT (hand-rolled, no external deps) ───────────────────────────
@@ -244,8 +198,6 @@ class AuthManager:
     def verify_api_key(self, raw_key: str) -> str | None:
         """Return user_id if API key is valid, update last_used_at."""
         kh = _hash_key(raw_key)
-        if not _check_api_key_rate_limit(kh):
-            return None
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(
                 "SELECT user_id FROM api_keys WHERE key_hash = ?",
