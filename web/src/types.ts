@@ -13,11 +13,10 @@ export interface DashboardData {
   agents: AgentHealth[];
   summary: {
     total_agents: number;
-    healthy: number;
-    degraded: number;
-    offline: number;
-    average_latency_p95: number;
-    system_success_rate: number;
+    healthy_count: number;
+    degraded_count: number;
+    unhealthy_count: number;
+    total_calls: number;
   };
 }
 
@@ -93,4 +92,21 @@ export interface Announcement {
   warn: boolean;
   timestamp: string;
   source: string;
+}
+
+// ── Policies ──
+export interface PolicyMatch {
+  field: string;
+  operator: string;
+  value: number | string;
+}
+
+export interface PolicyRule {
+  id: string;
+  name: string;
+  trigger: string;
+  description: string;
+  enabled: boolean;
+  actions: string[];
+  match: PolicyMatch[];
 }

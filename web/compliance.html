@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>合规中心 — ahyops 企业 AI Agent 治理平台</title>
+<meta name="description" content="2026年AI智能体新规解读、合规评估清单、SOC2/ISO27001审计报告一键导出。为企业AI部署做好合规准备。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='10' fill='%235A5A40'/><path d='M16 5.5L26.5 16L16 26.5L5.5 16L16 5.5Z' stroke='%23FAF9F6' stroke-width='1.5' stroke-linejoin='round'/><path d='M5.5 16C11.5 16 16 11.5 16 5.5C16 11.5 20.5 16 26.5 16C20.5 16 16 20.5 16 26.5C16 20.5 11.5 16 5.5 16Z' stroke='%23FAF9F6' stroke-width='1.5' stroke-linejoin='round'/><circle cx='16' cy='16' r='2.2' fill='%23FAF9F6'/></svg>">
+<style>
+:root {
+  --bg: #FAF9F6; --bg-card: #ffffff; --bg-elevated: #F2EFE9;
+  --border: #E6E1D6; --accent: #5A5A40; --accent-hover: #4A4A34; --accent-green: #10b981;
+  --text: #33312E; --text2: #827D72; --text3: #827D72; --text-secondary: #827D72; --text-muted: #827D72; --text-primary: #33312E;
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', monospace;
+  --radius: 12px; --radius-lg: 24px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.7;font-size:15px;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+
+header{
+  background:rgba(250,249,246,0.7);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);
+  padding:16px 32px;display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;z-index:10
+}
+header .logo{font-size:17px;font-weight:700;display:flex;align-items:center;gap:8px;color:var(--text)}
+header .logo .dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+header nav a{margin-left:24px;color:var(--text2);font-size:14px}
+header nav a:hover{color:var(--text);text-decoration:none}
+.cta-btn{
+  background:var(--accent);color:#fff!important;padding:8px 20px;
+  border-radius:99px;font-weight:600;display:inline-block;
+  box-shadow:0 4px 12px rgba(90,90,64,0.15);
+}
+.cta-btn:hover{background:var(--accent-hover);text-decoration:none!important}
+
+main{max-width:860px;margin:0 auto;padding:48px 24px}
+
+.hero{text-align:center;padding:40px 0 48px}
+.hero h1{font-size:36px;font-weight:700;letter-spacing:-.5px;line-height:1.2;margin-bottom:12px}
+.hero p{font-size:17px;color:var(--text2);max-width:600px;margin:0 auto 24px}
+.hero .badge{
+  display:inline-block;padding:4px 14px;border-radius:99px;
+  background:rgba(90,90,64,0.08);color:var(--accent);
+  font-size:12px;font-weight:600;margin-bottom:16px
+}
+
+.section{margin-bottom:40px}
+.section h2{font-size:22px;font-weight:600;margin-bottom:16px;letter-spacing:-.3px}
+.section h3{font-size:17px;font-weight:600;margin-bottom:8px;color:var(--text)}
+.section p,.section li{color:var(--text2)}
+
+.timeline{position:relative;padding-left:24px;border-left:2px solid var(--border)}
+.timeline-item{margin-bottom:24px;position:relative}
+.timeline-item::before{
+  content:'';position:absolute;left:-31px;top:6px;
+  width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid var(--bg)
+}
+.timeline-item .date{font-size:12px;color:var(--accent);font-weight:600;margin-bottom:4px}
+.timeline-item h4{font-size:15px;margin-bottom:4px}
+.timeline-item p{font-size:14px}
+
+.card{
+  background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);
+  padding:24px 28px;margin-bottom:16px;
+  box-shadow:0 4px 20px rgba(0,0,0,0.03);
+  transition:all 0.3s ease;
+}
+.card:hover{transform:scale(1.01);box-shadow:0 8px 30px rgba(0,0,0,0.06);}
+.card h4{font-size:16px;font-weight:600;margin-bottom:6px}
+.card p{font-size:14px;color:var(--text2)}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+
+.checklist-item{
+  display:flex;align-items:flex-start;gap:10px;
+  padding:12px 16px;background:var(--bg-card);border:1px solid var(--border);
+  border-radius:var(--radius);margin-bottom:8px;font-size:14px;
+  transition:all 0.2s ease;
+}
+.checklist-item:hover{box-shadow:0 2px 12px rgba(0,0,0,0.04);}
+.checklist-item input[type=checkbox]{margin-top:3px;accent-color:var(--accent);width:16px;height:16px}
+.checklist-item .q{flex:1;color:var(--text)}
+.checklist-item .hint{font-size:12px;color:var(--text3);margin-top:2px}
+
+.export-card{
+  background:linear-gradient(135deg, rgba(90,90,64,0.04), rgba(130,125,114,0.04));
+  border:1px solid var(--border);border-radius:var(--radius-lg);
+  padding:28px 32px;text-align:center
+}
+.export-card h4{font-size:18px;margin-bottom:4px}
+.export-card p{color:var(--text2);font-size:14px;margin-bottom:16px}
+.export-card .formats{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.export-card .format-tag{
+  padding:6px 16px;border-radius:99px;font-size:13px;font-weight:600;
+  border:1px solid var(--border);color:var(--text2);font-family:var(--font-mono)
+}
+
+.cta-section{
+  background:var(--accent);border-radius:var(--radius-lg);
+  padding:36px;text-align:center;margin:48px 0;
+  color:#fff;box-shadow:0 8px 30px rgba(90,90,64,0.15);
+}
+.cta-section h3{font-size:20px;margin-bottom:8px;color:#fff}
+.cta-section p{color:rgba(255,255,255,0.8);margin-bottom:20px}
+.cta-section .btn-lg{
+  display:inline-block;background:#fff;color:var(--accent);font-weight:600;
+  padding:12px 32px;border-radius:99px;font-size:15px;
+  box-shadow:0 4px 12px rgba(0,0,0,0.1);
+}
+
+footer{
+  text-align:center;padding:32px;color:var(--text3);font-size:13px;
+  border-top:1px solid var(--border);margin-top:48px
+}
+footer a{color:var(--text2)}
+
+@media(max-width:640px){
+  header{padding:12px 16px}
+  header nav a{margin-left:12px;font-size:13px}
+  .hero h1{font-size:26px}
+  .grid2{grid-template-columns:1fr}
+  main{padding:32px 16px}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <a href="/" class="logo"><span class="dot"></span> ahyops</a>
+  <nav>
+    <a href="/">产品</a>
+    <a href="/compliance" style="color:var(--accent)">合规中心</a>
+    <a href="https://github.com/Leo-Ayh-Oday/ahy-governance" target="_blank">GitHub</a>
+    <a href="/" class="cta-btn">免费使用</a>
+  </nav>
+</header>
+
+<main>
+
+<div class="hero">
+  <div class="badge">2026 年 7 月施行</div>
+  <h1>AI 智能体新规来了。<br>你的 Agent 准备好了吗？</h1>
+  <p>2026 年 5 月 8 日，国家网信办、发改委、工信部联合印发《智能体规范应用与创新发展实施意见》——这是中国首次对 AI 智能体进行系统性治理部署。</p>
+</div>
+
+<!-- Policy Timeline -->
+<div class="section">
+  <h2>政策时间线</h2>
+  <div class="timeline">
+    <div class="timeline-item">
+      <div class="date">2026 年 5 月 8 日</div>
+      <h4>《智能体规范应用与创新发展实施意见》印发</h4>
+      <p>三部委联合发文，明确要求智能体须具备：身份标识、权限管控、行为评测、决策追溯。这是中国 AI 治理从"内容合规"到"行为合规"的分水岭。</p>
+    </div>
+    <div class="timeline-item">
+      <div class="date">2026 年 7 月 15 日（预计）</div>
+      <h4>实施意见正式施行</h4>
+      <p>企业部署的 AI Agent 需满足可审计、可追溯、可管控的基本要求。不合规的 Agent 系统可能面临整改或下架。</p>
+    </div>
+    <div class="timeline-item">
+      <div class="date">2026 年 Q3-Q4</div>
+      <h4>地方细则和行业标准陆续出台</h4>
+      <p>金融、医疗、政务等高监管行业将率先发布 Agent 治理的行业标准和实施细则。</p>
+    </div>
+  </div>
+</div>
+
+<!-- What This Means -->
+<div class="section">
+  <h2>这对你的企业意味着什么</h2>
+  <div class="grid2">
+    <div class="card">
+      <h4>每条 Agent 决策必须可追溯</h4>
+      <p>AI Agent 不再是一个黑箱。谁在什么时间发起了什么操作、结果如何——这些信息必须完整记录，且不可篡改。</p>
+    </div>
+    <div class="card">
+      <h4>Agent 必须有身份和权限</h4>
+      <p>每个 Agent 需要明确的身份标识和操作权限边界。不能所有 Agent 共用一把 API Key，不能所有 Agent 都能访问敏感数据。</p>
+    </div>
+    <div class="card">
+      <h4>跨 Agent 冲突必须被检测</h4>
+      <p>当两个 Agent 产出矛盾的结果——例如一个说合同金额 500 万、另一个说 800 万——系统必须能检测并告警，而非静默地输出矛盾信息。</p>
+    </div>
+    <div class="card">
+      <h4>合规报告必须在需要时能一键生成</h4>
+      <p>监管部门检查时，你不能说"等我导出一下日志"。3 分钟内交出一份防篡改、可验证的审计报告，是合规的基本功。</p>
+    </div>
+  </div>
+</div>
+
+<!-- How ahyops Helps -->
+<div class="section">
+  <h2>ahyops 如何帮你合规</h2>
+  <div class="card">
+    <h4>防篡改审计链</h4>
+    <p>每个 Agent 决策都通过 SHA-256 哈希链接到前一条记录，形成不可篡改的审计链。任何篡改行为都会被自动检测并标记。满足 SOC 2 Type II 和 ISO 27001 的审计追溯要求。</p>
+  </div>
+  <div class="card">
+    <h4>RBAC + API Key 权限管控</h4>
+    <p>基于角色的访问控制（Admin / Operator / Viewer），每个 Agent 独立 API Key，支持按 Workspace 隔离。所有权限变更都记录在审计日志中。</p>
+  </div>
+  <div class="card">
+    <h4>跨 Agent 冲突自动检测</h4>
+    <p>5 种冲突类型实时检测：事实矛盾、依赖断裂、格式不匹配、范围重叠、置信度冲突。检测到 CRITICAL 级别冲突时自动告警。</p>
+  </div>
+  <div class="card">
+    <h4>一键导出合规报告</h4>
+    <p>SOC 2 和 ISO 27001 格式的审计报告，一键导出。覆盖访问控制、加密、操作安全、事件管理、合规五大控制域。</p>
+  </div>
+</div>
+
+<!-- Compliance Self-Assessment -->
+<div class="section">
+  <h2>合规自评清单</h2>
+  <p style="color:var(--text2);margin-bottom:16px">逐项检查你的 AI Agent 部署是否满足新规要求：</p>
+
+  <div class="checklist-item">
+    <input type="checkbox"><div class="q">每个 AI Agent 是否有独立身份标识？<div class="hint">不能多个 Agent 共用同一个 API Key 或同一个 user_id。</div></div>
+  </div>
+  <div class="checklist-item">
+    <input type="checkbox"><div class="q">每个 Agent 的操作是否完整记录并可追溯？<div class="hint">每次 LLM 调用、每次工具调用、每次外部 API 请求——谁、什么时间、做了什么、结果如何。</div></div>
+  </div>
+  <div class="checklist-item">
+    <input type="checkbox"><div class="q">审计日志是否防篡改？<div class="hint">普通日志文件可以被删除或修改。需要有哈希链或区块链级别的完整性保护。</div></div>
+  </div>
+  <div class="checklist-item">
+    <input type="checkbox"><div class="q">是否能 3 分钟内生成合规报告？<div class="hint">监管部门检查时不能"等我两天整理数据"。合规报告必须是自动化的。</div></div>
+  </div>
+  <div class="checklist-item">
+    <input type="checkbox"><div class="q">跨 Agent 冲突是否有检测机制？<div class="hint">两个 AI 给出矛盾结论时，系统能否自动发现并告警？</div></div>
+  </div>
+  <div class="checklist-item">
+    <input type="checkbox"><div class="q">Agent 成本是否有预算管控？<div class="hint">AI API 调用成本是否可控？是否有预算上限和自动熔断机制？</div></div>
+  </div>
+  <div class="checklist-item">
+    <input type="checkbox"><div class="q">用户输入是否做了注入攻击检测？<div class="hint">Agent 面向终端用户时，用户输入可能包含 prompt injection 攻击，需要有安全检测。</div></div>
+  </div>
+  <div class="checklist-item">
+    <input type="checkbox"><div class="q">敏感数据（手机号、身份证、银行卡）是否自动脱敏？<div class="hint">审计日志中不能包含明文敏感信息，需要在记录前自动脱敏。</div></div>
+  </div>
+</div>
+
+<!-- Compliance Report Export -->
+<div class="section">
+  <h2>审计报告导出</h2>
+  <div class="export-card">
+    <h4>一键导出 · 即取即用</h4>
+    <p>你的 Agent 运行数据可以一键导出为标准合规报告格式，覆盖国际和国内审计要求</p>
+    <div class="formats">
+      <span class="format-tag">SOC 2 Type II</span>
+      <span class="format-tag">ISO 27001</span>
+      <span class="format-tag">JSON (原始数据)</span>
+      <span class="format-tag">CSV (Excel 可用)</span>
+    </div>
+  </div>
+</div>
+
+<!-- CTA -->
+<div class="cta-section">
+  <h3>在政策正式施行前，把你的 AI Agent 治理搭好</h3>
+  <p>开源 · MIT 协议 · 5 个 Agent 免费 · 30 秒接入</p>
+  <a href="/" class="btn-lg">免费开始 →</a>
+</div>
+
+<!-- ═══════════ Dynamic Compliance Dashboard ═══════════ -->
+<style>
+.cd-section { max-width: 800px; margin: 0 auto 40px; padding: 0 24px; }
+.cd-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+@media (max-width: 768px) { .cd-grid { grid-template-columns: 1fr; } }
+.cd-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 24px; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.03); }
+.cd-card h4 { font-size: 14px; color: var(--text-secondary); margin-bottom: 8px; }
+.cd-score { font-size: 36px; font-weight: 800; margin: 8px 0; }
+.cd-score.good { color: #10b981; } .cd-score.warn { color: #f59e0b; } .cd-score.na { color: #827D72; }
+.cd-status { font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 20px; display: inline-block; }
+.cd-status.gen { background: rgba(16,185,129,0.12); color: #10b981; }
+.cd-status.nogen { background: rgba(245,158,11,0.12); color: #f59e0b; }
+.cd-btn { background: var(--accent); color: #fff; border: none; border-radius: 99px; padding: 10px 24px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all .15s; margin-top: 12px; box-shadow: 0 4px 12px rgba(90,90,64,0.15); }
+.cd-btn:hover { background: var(--accent-hover); transform: translateY(-1px); }
+.cd-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.cd-table { width: 100%; border-collapse: collapse; margin-top: 16px; background: var(--bg-card); border-radius: var(--radius); border: 1px solid var(--border); }
+.cd-table th, .cd-table td { padding: 10px 14px; text-align: left; font-size: 13px; border-bottom: 1px solid var(--border); }
+.cd-table th { color: var(--text2); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+.cd-table td { color: var(--text); }
+.cd-spinner { text-align: center; padding: 32px; color: var(--text2); }
+.cd-modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+.cd-modal.show { display: flex; }
+.cd-modal-inner { background: var(--bg-card); border: 1px solid var(--border); border-radius: 24px; padding: 32px; max-width: 700px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.1); }
+.cd-modal-inner h3 { margin: 0 0 16px; font-size: 18px; }
+.cd-close { position: absolute; top: 12px; right: 16px; background: none; border: none; color: var(--text2); font-size: 20px; cursor: pointer; }
+</style>
+
+<div class="cd-section">
+  <div style="text-align:center;margin-bottom:32px;">
+    <h2 style="font-size:24px;font-weight:700;margin-bottom:8px;">合规仪表盘</h2>
+    <p style="color:var(--text-secondary);font-size:14px;">实时监控企业 AI Agent 合规状态，一键生成监管申报材料</p>
+    <p style="color:var(--text-muted);font-size:11px;margin-top:4px;">⚠ 本工具仅供参考，正式申报请咨询合规专家</p>
+  </div>
+
+  <div class="cd-grid" id="cd-cards">
+    <div class="cd-card"><div class="cd-spinner">加载中...</div></div>
+    <div class="cd-card"><div class="cd-spinner">加载中...</div></div>
+    <div class="cd-card"><div class="cd-spinner">加载中...</div></div>
+  </div>
+
+  <div style="text-align:center;margin-bottom:24px;">
+    <button class="cd-btn" id="cd-btn-generate" onclick="generateReport()" disabled>生成合规报告</button>
+  </div>
+
+  <div class="section-title" style="margin-bottom:12px;">报告历史</div>
+  <div class="table-wrap"><table class="cd-table"><thead><tr><th>类型</th><th>框架</th><th>评分</th><th>生成时间</th><th>操作</th></tr></thead><tbody id="cd-history"><tr><td colspan="5" class="cd-spinner">加载中...</td></tr></tbody></table></div>
+</div>
+
+<div class="cd-modal" id="cd-modal">
+  <div class="cd-modal-inner">
+    <button class="cd-close" onclick="closeModal()">✕</button>
+    <h3 id="cd-modal-title">报告详情</h3>
+    <div id="cd-modal-body"></div>
+  </div>
+</div>
+
+</main>
+
+<footer>
+  <p>© 2026 ahyops.cn &nbsp;|&nbsp; <a href="/">产品</a> &nbsp;|&nbsp; <a href="https://github.com/Leo-Ayh-Oday/ahy-governance">GitHub</a> &nbsp;|&nbsp; 联系: leo-ahy-oday@outlook.com</p>
+  <p style="margin-top:4px;font-size:12px">本页面内容仅供参考，不构成法律建议。企业合规请咨询专业律师。</p>
+</footer>
+
+<script>
+const API = '/api';
+
+async function fetchJSON(url, opts) {
+  if (!opts) opts = {};
+  opts.headers = opts.headers || {};
+  const res = await fetch(url, opts);
+  if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error || res.statusText);
+  return res.json();
+}
+
+const REPORT_LABELS = {
+  algorithm_filing: '算法备案',
+  safety_assessment: 'AI 安全评估',
+  data_export: '数据出境评估'
+};
+
+async function loadComplianceDashboard() {
+  try {
+    const status = await fetchJSON(API + '/compliance/status');
+    const reports = await fetchJSON(API + '/compliance/reports?limit=10');
+    renderCards(status);
+    renderHistory(reports);
+    document.getElementById('cd-btn-generate').disabled = false;
+  } catch (e) {
+    document.getElementById('cd-cards').innerHTML = '<div class="cd-card" style="grid-column:1/-1;">Error: ' + e.message + '</div>';
+  }
+}
+
+function renderCards(status) {
+  const types = [
+    { key: 'algorithm_filing', icon: '📋', name: '算法备案' },
+    { key: 'safety_assessment', icon: '🛡', name: 'AI 安全评估' },
+    { key: 'data_export', icon: '🌐', name: '数据出境评估' },
+  ];
+  document.getElementById('cd-cards').innerHTML = types.map(t => {
+    const s = status[t.key] || {};
+    const score = s.score;
+    const cls = score >= 80 ? 'good' : score >= 60 ? 'warn' : 'na';
+    return `<div class="cd-card">
+      <h4>${t.icon} ${t.name}</h4>
+      <div class="cd-score ${cls}">${s.generated ? score+'/100' : '—'}</div>
+      <span class="cd-status ${s.generated ? 'gen' : 'nogen'}">${s.generated ? '已生成' : '未生成'}</span>
+      ${s.last_generated ? '<div style="font-size:10px;color:var(--text-muted);margin-top:4px;">'+s.last_generated.slice(0,10)+'</div>' : ''}
+    </div>`;
+  }).join('');
+}
+
+function renderHistory(reports) {
+  const tbody = document.getElementById('cd-history');
+  if (!reports.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:20px;">暂无报告</td></tr>';
+    return;
+  }
+  tbody.innerHTML = reports.map(r => `<tr>
+    <td>${REPORT_LABELS[r.report_type] || r.report_type}</td>
+    <td style="font-size:12px;">${r.framework || '—'}</td>
+    <td><span class="cd-status ${r.compliance_score >= 80 ? 'gen' : 'nogen'}">${r.compliance_score}/100</span></td>
+    <td style="font-size:12px;">${(r.created_at||'').slice(0,16)}</td>
+    <td>
+      <button class="cd-btn" style="padding:4px 12px;font-size:11px;margin-top:0;" onclick="viewReport('${r.id}')">查看</button>
+      <button class="cd-btn" style="padding:4px 12px;font-size:11px;margin-top:0;background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--border);" onclick="exportReport('${r.id}','json')">JSON</button>
+      <button class="cd-btn" style="padding:4px 12px;font-size:11px;margin-top:0;background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--border);" onclick="exportReport('${r.id}','pdf')">PDF</button>
+    </td>
+  </tr>`).join('');
+}
+
+async function generateReport() {
+  const type = prompt('选择报告类型:\n1. algorithm_filing — 算法备案\n2. safety_assessment — AI安全评估\n3. data_export — 数据出境评估\n\n输入数字 (1/2/3):', '1');
+  const map = { '1': 'algorithm_filing', '2': 'safety_assessment', '3': 'data_export' };
+  const reportType = map[type] || 'algorithm_filing';
+  const btn = document.getElementById('cd-btn-generate');
+  btn.disabled = true;
+  btn.textContent = '生成中...';
+  try {
+    const report = await fetchJSON(API + '/compliance/reports/generate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ report_type: reportType })
+    });
+    alert('报告生成成功！\n合规评分: ' + report.compliance_score + '/100\n框架: ' + report.framework);
+    await loadComplianceDashboard();
+  } catch (e) {
+    alert('生成失败: ' + e.message);
+  }
+  btn.disabled = false;
+  btn.textContent = '生成合规报告';
+}
+
+async function viewReport(id) {
+  try {
+    const report = await fetchJSON(API + '/compliance/reports/' + id);
+    const r = report.report || {};
+    document.getElementById('cd-modal-title').textContent = r.framework || '报告详情';
+    document.getElementById('cd-modal-body').innerHTML = `
+      <p><b>类型:</b> ${REPORT_LABELS[r.report_type] || r.report_type} | <b>评分:</b> ${r.compliance_score}/100</p>
+      ${(r.sections||[]).map(s => `<div style="margin:12px 0;padding:12px;border:1px solid var(--border);border-radius:8px;">
+        <b>${s.title}</b> <span class="cd-status ${s.status==='pass'?'gen':'nogen'}">${s.status}</span>
+        <p style="margin:4px 0 0;font-size:13px;color:var(--text-secondary);">${s.content}</p>
+      </div>`).join('')}
+      ${(r.recommendations||[]).length ? '<p><b>改进建议:</b></p><ul>'+r.recommendations.map(x=>'<li>'+x+'</li>').join('')+'</ul>' : ''}
+    `;
+    document.getElementById('cd-modal').classList.add('show');
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function exportReport(id, format) {
+  try {
+    const url = API + '/compliance/reports/' + id + '/export?format=' + format;
+    if (format === 'pdf' || format === 'html') {
+      const res = await fetch(url);
+      const html = await res.text();
+      const w = window.open('', '_blank');
+      w.document.write(html);
+      w.document.close();
+    } else {
+      window.open(url, '_blank');
+    }
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+function closeModal() { document.getElementById('cd-modal').classList.remove('show'); }
+
+loadComplianceDashboard();
+</script>
+
+</body>
+</html>

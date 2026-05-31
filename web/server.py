@@ -1,18 +1,24 @@
 ﻿"""Ahy Governance Web Dashboard — FastAPI backend."""
 
 import json
-import logging
 import os
 import re
+import time as _time_module
 from datetime import datetime, timezone
 from pathlib import Path
+
 from fastapi import FastAPI, Query, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
-logger = logging.getLogger(__name__)
+# Structured logging
+from ahy_governance.logging_config import (
+    setup_logging, get_logger, get_correlation_id, set_correlation_id,
+)
+
+logger = get_logger(__name__)
 
 import httpx
 
@@ -68,7 +74,7 @@ try:
 except ImportError:
     get_reporter = ComplianceReporter = None
 
-app = FastAPI(title="Ahy Governance Dashboard", version="0.8.0")
+app = None  # defined after lifespan
 
 
 def _require(name: str, module: object):
@@ -76,25 +82,101 @@ def _require(name: str, module: object):
     if module is None:
         raise HTTPException(501, f"{name} module not available in this deployment")
 
-# ── Database initialization ─────────────────────────────────────
+# ── Lifespan (replaces deprecated on_event) ──────────────────────
 
-@app.on_event("startup")
-async def startup_db():
-    """Initialize SQLite persistence. Uses AHY_DB_PATH env var, defaults to ./data/ahy_governance.db."""
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app):
+    # Startup
     db_path = os.environ.get("AHY_DB_PATH", str(Path(__file__).parent.parent / "data" / "ahy_governance.db"))
+    os.environ["AHY_DB_PATH"] = db_path
     try:
-        from ahy_governance import init_database
-        init_database(db_path)
-        print(f"[ahyops] SQLite database initialized at {db_path}")
+        from ahy_governance.storage import create_database
+        db = create_database()
+        get_monitor().set_database(db)
+        get_tracker().set_database(db)
+        get_auditor().set_database(db)
+        backend = "postgres" if os.environ.get("DATABASE_URL", "").startswith("postgres") else "sqlite"
+        logger.info("database_initialized", path=db_path, backend=backend)
     except Exception as e:
-        print(f"[ahyops] WARNING: Database init failed ({e}), using in-memory fallback")
+        logger.warning("database_init_failed", error=str(e))
+
+    import asyncio
+    probe_task = asyncio.create_task(_agent_probe_loop())
+
+    # Seed demo data (skipped: DEMO_SEEDED=True)
+    seed_demo_on_startup()
+
+    yield
+
+    # Shutdown
+    probe_task.cancel()
+    try:
+        await probe_task
+    except asyncio.CancelledError:
+        pass
+
+
+app = FastAPI(title="Ahy Governance Dashboard", version="0.8.0", lifespan=lifespan)
+
+
+async def _agent_probe_loop():
+    import asyncio
+    while True:
+        await asyncio.sleep(30)
+        try:
+            agents = get_monitor().agent_list() or []
+            for a in agents:
+                upstream = a.get("upstream_url", "")
+                if not upstream:
+                    continue
+                discovered = await _probe_agent_health(upstream)
+                if discovered:
+                    get_monitor().heartbeat(
+                        a["agent_name"],
+                        discovered.get("status", "ok"),
+                        discovered.get("probe_latency_ms", 0),
+                        a.get("workspace_id", ""),
+                    )
+                    get_auditor().log(
+                        AuditEventType.AGENT_HEARTBEAT, a["agent_name"],
+                        {"probe_result": discovered},
+                        workspace_id=a.get("workspace_id", ""),
+                    )
+        except Exception:
+            pass
+
+
+_cors_origins_env = os.environ.get("CORS_ORIGINS", "")
+if _cors_origins_env == "*":
+    _cors_origins = ["*"]
+elif _cors_origins_env:
+    _cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+else:
+    _cors_origins = []
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"])
+
+
+# ── Correlation ID middleware ─────────────────────────────────────
+
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    """Attach or propagate X-Correlation-Id header for request tracing."""
+    cid = request.headers.get("X-Correlation-Id", "")
+    if not cid:
+        import uuid
+        cid = uuid.uuid4().hex[:12]
+    set_correlation_id(cid)
+    response = await call_next(request)
+    response.headers["X-Correlation-Id"] = cid
+    return response
 
 
 # Auth middleware: resolve workspace context on every API request.
@@ -136,10 +218,9 @@ MODELS = [
 # Narrative demo config: 5-agent contract review pipeline gone wrong
 # Planner + Executor build review → Reviewer finds deadline conflict →
 # Analyst hits budget wall → Governor crashes → audit chain stays intact
-DEMO_SEEDED = False
+DEMO_SEEDED = True  # disabled: no fake demo data on startup
 
 
-@app.on_event("startup")
 async def seed_demo_on_startup():
     """Auto-load demo data so the dashboard isn't empty on first visit."""
     global DEMO_SEEDED
@@ -483,11 +564,7 @@ async def auth_delete_key(key_id: str, user_id: str = Depends(get_current_user))
 # ── Health Monitor ────────────────────────────────────────────────
 
 def _refresh_demo_heartbeats():
-    """Keep demo agent heartbeats current so status evaluation works."""
-    for name in AGENTS:
-        if name == "Governor":
-            continue  # deliberately kept stale to demo offline status
-        get_monitor().heartbeat(name, "ok", 0)
+    return  # disabled: no fake heartbeat injection
 
 
 @app.get("/api/health/dashboard")
@@ -659,6 +736,57 @@ async def cost_demo():
     return {"ok": True}
 
 
+@app.get("/api/cost/advisor")
+async def cost_advisor_scan(request: Request):
+    """Run cost optimization analysis and return recommendations."""
+    from ahy_governance.cost_advisor import get_advisor
+    advisor = get_advisor()
+    recs = advisor.analyze(get_tracker())
+    return [r.to_dict() for r in recs]
+
+
+@app.post("/api/cost/advisor/demo")
+async def cost_advisor_demo():
+    """Seed data showing premium model overuse, then run advisor."""
+    t = get_tracker()
+    t.set_budget(100, "monthly", 0.8, False)
+    # Planner on expensive Opus
+    for _ in range(15):
+        t.track("Planner", "claude-opus-4-7", 20000, 10000, SESSIONS[0])
+    # Analyst on cheap DeepSeek
+    for _ in range(15):
+        t.track("Analyst", "deepseek-chat", 30000, 20000, SESSIONS[0])
+    return {"ok": True}
+
+
+# ── Anomaly Detector ─────────────────────────────────────────────
+
+@app.get("/api/anomalies/scan")
+async def anomalies_scan(request: Request):
+    """Run anomaly detection and return findings."""
+    from ahy_governance.anomaly_detector import get_anomaly_detector
+    detector = get_anomaly_detector()
+    anomalies = detector.scan_all(get_monitor(), get_tracker())
+    return [a.to_dict() for a in anomalies]
+
+
+@app.post("/api/anomalies/demo")
+async def anomalies_demo():
+    """Seed data showing token spike anomaly."""
+    from datetime import timedelta
+    t = get_tracker()
+    now = datetime.now(timezone.utc)
+    # Normal baseline
+    for i in range(15):
+        ts = (now - timedelta(minutes=30 - i)).isoformat()
+        t.track("Planner", "gpt-4o", 1000, 500, SESSIONS[0])
+    # Recent spike
+    for i in range(5):
+        ts = (now - timedelta(minutes=5 - i)).isoformat()
+        t.track("Planner", "gpt-4o", 50000, 20000, SESSIONS[0])
+    return {"ok": True}
+
+
 # ── Conflict Detector ─────────────────────────────────────────────
 
 @app.get("/api/conflicts/types")
@@ -816,6 +944,41 @@ async def conflict_arbitrate(data: ArbitrateBody, request: Request):
     return [r.to_dict() for r in results]
 
 
+class AutoResolveBody(BaseModel):
+    conflicts: list[dict]
+    step_outputs: dict[str, dict] = {}
+    min_confidence: float = 0.7
+
+
+@app.post("/api/conflicts/auto-resolve")
+async def conflict_auto_resolve(data: AutoResolveBody):
+    """Run auto-resolver on a list of conflicts."""
+    from ahy_governance.auto_resolver import AutoResolver
+    from ahy_governance.conflict_detector import Conflict, ConflictType, Severity
+    from types import SimpleNamespace
+
+    resolver = AutoResolver(min_confidence=data.min_confidence)
+
+    # Convert raw dicts to Conflict objects
+    conflicts = []
+    for c in data.conflicts:
+        conflicts.append(Conflict(
+            conflict_type=ConflictType(c.get("conflict_type", "fact_conflict")),
+            severity=Severity(c.get("severity", "MEDIUM")),
+            agents_involved=c.get("agents_involved", []),
+            description=c.get("description", ""),
+            evidence=c.get("evidence", {}),
+        ))
+
+    # Convert step_outputs to SimpleNamespace for .output access
+    outputs = {}
+    for name, val in data.step_outputs.items():
+        outputs[name] = SimpleNamespace(output=val)
+
+    results = resolver.resolve(conflicts, outputs)
+    return [r.to_dict() for r in results]
+
+
 @app.get("/api/agents/{agent_name}/trust")
 async def agent_trust_get(agent_name: str, request: Request):
     db = get_db()
@@ -961,6 +1124,57 @@ async def audit_export_soc2():
 @app.get("/api/audit/export/iso27001")
 async def audit_export_iso27001():
     return get_auditor().export_iso27001()
+
+
+@app.get("/api/audit/sessions")
+async def audit_sessions():
+    """List available replay sessions."""
+    auditor = get_auditor()
+    sessions: dict[str, dict] = {}
+    for entry in auditor._entries:
+        sid = entry.session_id or "unknown"
+        if sid not in sessions:
+            sessions[sid] = {
+                "session_id": sid,
+                "event_count": 0,
+                "start_time": entry.timestamp,
+                "end_time": entry.timestamp,
+                "agents": set(),
+            }
+        s = sessions[sid]
+        s["event_count"] += 1
+        s["end_time"] = max(s["end_time"], entry.timestamp)
+        s["start_time"] = min(s["start_time"], entry.timestamp)
+        s["agents"].add(entry.agent_name)
+
+    result = []
+    for s in sessions.values():
+        s["agents"] = sorted(s["agents"])
+        result.append(s)
+    result.sort(key=lambda x: x["start_time"], reverse=True)
+    return result
+
+
+@app.get("/api/audit/replay")
+async def audit_replay(session_id: str = ""):
+    """Return all audit events for a session, sorted by timestamp."""
+    auditor = get_auditor()
+    events = []
+    for entry in auditor._entries:
+        if session_id and entry.session_id != session_id:
+            continue
+        events.append({
+            "index": entry.index,
+            "timestamp": entry.timestamp,
+            "event_type": entry.event_type.value,
+            "agent_name": entry.agent_name,
+            "details": entry.details,
+            "session_id": entry.session_id,
+            "hash": entry.hash,
+            "prev_hash": entry.prev_hash,
+        })
+    events.sort(key=lambda e: e["index"])
+    return {"session_id": session_id or "all", "events": events, "total": len(events)}
 
 
 @app.post("/api/audit/demo")
@@ -1369,7 +1583,7 @@ async def agent_report(data: AgentReportBody):
         alerts["health"] = {
             "status": health.status.value,
             "success_rate": health.success_rate,
-            "p95_latency_ms": health.latency_p95,
+            "p95_latency_ms": health.to_dict().get("latency_p95", 0),
             "detail": f"Agent {agent} is {health.status.value}"
         }
 
@@ -1387,7 +1601,7 @@ async def agent_report(data: AgentReportBody):
                     "detail": f"Budget at {budget.get('usage_pct', 0):.1f}% — threshold {budget.get('alert_threshold', 0.8)*100:.0f}%"
                 }
         except Exception:
-            logger.warning("budget tracking failed in heartbeat", exc_info=True)
+            logger.warning("budget_tracking_failed", exc_info=True)
 
     # 3. Audit: log the event
     try:
@@ -1416,7 +1630,7 @@ async def agent_report(data: AgentReportBody):
                     "detail": f"Potential prompt injection detected (confidence: {result.injection_confidence:.2f})"
                 }
         except Exception:
-            logger.warning("guard injection scan failed", exc_info=True)
+            logger.warning("guard_injection_scan_failed", exc_info=True)
 
     return {
         "ok": True,
@@ -1591,8 +1805,9 @@ import secrets as _secrets
 
 class AgentRegisterBody(BaseModel):
     agent_name: str
-    model: str
     upstream_url: str
+    model: str = ""           # optional — auto-discovered from health probe
+    health_path: str = ""     # optional — custom health endpoint path
 
 
 class AgentBatchBody(BaseModel):
@@ -1624,17 +1839,94 @@ async def list_models():
     return {"models": providers, "quick_endpoints": endpoints}
 
 
+async def _probe_agent_health(upstream_url: str) -> dict:
+    """Probe an agent's health endpoint. Returns discovered info. Raises if unreachable."""
+    health_probes = ["/api/health", "/health", "/metrics", "/"]
+    upstream = upstream_url.rstrip("/")
+    client = _get_http_client()
+    reached = False
+    discovered: dict = {"agent_type": "unknown", "integration": "manual"}
+
+    # Phase 1: Probe /v1/models → OpenAI-compatible detection
+    try:
+        r = await client.get(f"{upstream}/v1/models", timeout=5)
+        if r.status_code == 200:
+            reached = True
+            ct = r.headers.get("content-type", "")
+            if ct.startswith("application/json"):
+                body = r.json()
+                data = body.get("data", [])
+                if data and isinstance(data, list):
+                    discovered["model"] = data[0].get("id", "unknown")
+                    discovered["agent_type"] = "openai_compatible"
+                    discovered["integration"] = "proxy"
+                    discovered["integration_note"] = "代理模式，自动抓取 token 和成本"
+    except Exception:
+        pass
+
+    # Phase 2: Probe /v1/chat/completions → some APIs hide models endpoint
+    if discovered["agent_type"] == "unknown":
+        try:
+            r = await client.post(f"{upstream}/v1/chat/completions",
+                json={"model": "unknown", "messages": [{"role": "user", "content": "hi"}]},
+                timeout=5)
+            if r.status_code in (200, 400, 401, 422):
+                reached = True
+                discovered["agent_type"] = "openai_compatible"
+                discovered["integration"] = "proxy"
+                discovered["integration_note"] = "代理模式（/v1/chat/completions 可用）"
+        except Exception:
+            pass
+
+    # Phase 3: Probe health endpoints for status + version + type fingerprint
+    for path in health_probes:
+        try:
+            r = await client.get(f"{upstream}{path}", timeout=5)
+            if r.status_code == 200:
+                reached = True
+                ct = r.headers.get("content-type", "")
+                body = r.json() if ct.startswith("application/json") else {}
+                discovered.update({
+                    "version": body.get("version") or body.get("app_version", "unknown"),
+                    "status": body.get("status", "ok"),
+                    "agent_status": body.get("agent_status", ""),
+                    "probe_path": path,
+                    "probe_latency_ms": round(r.elapsed.total_seconds() * 1000, 1),
+                })
+                # Fingerprint agent type from health response signature
+                if discovered["agent_type"] == "unknown":
+                    if body.get("agent_status") or body.get("memory"):
+                        discovered["agent_type"] = "ahy_agent"
+                        discovered["integration"] = "sdk"
+                        discovered["integration_note"] = "自定义 Agent，使用 /api/agent/report 上报"
+                    elif "/chat" in str(body) or "stream" in str(body):
+                        discovered["agent_type"] = "custom_http"
+                        discovered["integration"] = "webhook"
+                        discovered["integration_note"] = "自定义 HTTP，通过 webhook 上报"
+                    else:
+                        discovered["agent_type"] = "health_only"
+                        discovered["integration"] = "manual"
+                        discovered["integration_note"] = "仅健康监控"
+                break
+        except Exception:
+            continue
+
+    if not reached:
+        raise HTTPException(502, f"无法连接到 {upstream_url}——请检查 URL 是否正确、Agent 是否在运行")
+    if "model" not in discovered:
+        discovered["model"] = "unknown"
+    discovered["reachable"] = True
+    return discovered
+
+
 @app.post("/api/agent/register")
 async def agent_register(data: AgentBatchBody, request: Request):
-    """Register one or more agents. Returns proxy replacement URLs.
+    """Register agents with auto-discovery.
 
-    The user's API key is NEVER sent to us. We only store:
-    agent_name, model, upstream_url, workspace_id.
-    The proxy forwards the original Authorization header to upstream_url.
+    Probes each agent's health endpoint to discover real model, version,
+    and status. Rejects unreachable agents.
     """
-    ws_id = _get_ws(request)
-    if not ws_id:
-        raise HTTPException(400, "No workspace context. Register or use X-Workspace-Id header.")
+    ws_id = _get_ws(request) or "default"
 
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
@@ -1644,26 +1936,29 @@ async def agent_register(data: AgentBatchBody, request: Request):
         if not agent.agent_name or not agent.upstream_url:
             raise HTTPException(400, "agent_name and upstream_url are required")
 
-        agent_id = "ag_" + _secrets.token_hex(12)  # ag_ + 24 hex = 27 chars
+        agent_id = "ag_" + _secrets.token_hex(12)
         proxy_url = f"https://ahyops.cn/api/proxy/v1/agent/{agent_id}"
+        upstream = agent.upstream_url.rstrip("/")
 
-        try:
-            get_monitor()._db.agent_register(
-                agent_id, ws_id, agent.agent_name, agent.model or "unknown",
-                agent.upstream_url.rstrip("/"), now)
-        except Exception:
-            # Fallback: register via singleton's db
-            from ahy_governance.storage import Database
-            db = Database(os.environ.get("AHY_DB_PATH", ""))
-            if db.enabled:
-                db.agent_register(agent_id, ws_id, agent.agent_name,
-                                  agent.model or "unknown", agent.upstream_url.rstrip("/"), now)
+        discovered = await _probe_agent_health(upstream)
+        model = agent.model or discovered.get("model", "unknown")
+        latency = discovered.get("probe_latency_ms", 0)
+
+        get_monitor().agent_register(agent_id, ws_id, agent.agent_name,
+                                      model, upstream, now)
+        get_monitor().heartbeat(agent.agent_name, discovered.get("status", "ok"),
+                                latency, ws_id)
+        get_auditor().log(AuditEventType.AGENT_START, agent.agent_name,
+                          {"agent_id": agent_id, "discovered": discovered,
+                           "upstream_url": upstream},
+                          "", workspace_id=ws_id)
 
         results.append({
             "agent_id": agent_id,
             "agent_name": agent.agent_name,
             "original_url": agent.upstream_url,
             "replace_with": proxy_url,
+            "discovered": discovered,
         })
 
     return {"registered": len(results), "agents": results}
@@ -1786,6 +2081,7 @@ async def proxy_agent_chat(agent_id: str, request: Request):
 # ── Main ──────────────────────────────────────────────────────────
 
 def main():
+    setup_logging(level=os.environ.get("LOG_LEVEL", "INFO"))
     import uvicorn
     uvicorn.run("web.server:app", host="0.0.0.0", port=8080, reload=False)
 

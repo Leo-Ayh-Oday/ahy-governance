@@ -53,17 +53,20 @@ export function Dashboard() {
   }
 
   const summary = health?.summary;
+  const successRate = summary && summary.total_agents > 0
+    ? ((summary.healthy_count / summary.total_agents) * 100).toFixed(0)
+    : null;
   const stats = [
     {
       label: '活跃 Agent', value: String(summary?.total_agents ?? '—'),
-      change: summary ? `${summary.healthy} 健康` : '—',
-      trend: (summary && summary.healthy === summary.total_agents ? 'up' : 'down') as 'up' | 'down',
+      change: summary ? `${summary.healthy_count} 健康` : '—',
+      trend: (summary && summary.healthy_count === summary.total_agents ? 'up' : 'down') as 'up' | 'down',
       icon: Users, color: 'text-brand-500' as const,
     },
     {
-      label: '系统响应率', value: summary?.system_success_rate != null ? `${summary.system_success_rate.toFixed(1)}%` : '—',
-      change: summary?.degraded ? `${summary.degraded} 降级` : '全健康',
-      trend: (summary?.degraded ? 'down' : 'up') as 'up' | 'down',
+      label: '系统响应率', value: successRate ? `${successRate}%` : '—',
+      change: summary?.degraded_count ? `${summary.degraded_count} 降级` : '全健康',
+      trend: (summary?.degraded_count ? 'down' : 'up') as 'up' | 'down',
       icon: Activity, color: 'text-emerald-500' as const,
     },
     {

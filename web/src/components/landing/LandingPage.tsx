@@ -91,7 +91,8 @@ export function LandingPage() {
   useEffect(() => {
     fetchDashboard().then(d => {
       setActiveAgents(d.summary?.total_agents ?? d.agents?.length ?? 0);
-      setComplianceRate(d.summary?.system_success_rate ?? 100);
+      const s = d.summary;
+      setComplianceRate(s ? Math.round((s.healthy_count / Math.max(s.total_agents, 1)) * 100) : 100);
     }).catch(() => {
       setActiveAgents(null);
       setComplianceRate(null);

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import {
-  LayoutDashboard, Search, ShieldCheck, Activity, Settings, ChevronRight,
+  LayoutDashboard, Search, ShieldCheck, Activity, Settings, ChevronRight, Clock,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { fetchDashboard, fetchBudget } from '../../api';
@@ -11,6 +11,7 @@ const navItems = [
   { id: 'registry', label: 'Agent 注册与发现', icon: Search },
   { id: 'policies', label: '策略控制', icon: ShieldCheck },
   { id: 'observability', label: '可观测性', icon: Activity },
+  { id: 'replay', label: 'Run Replay', icon: Clock },
   { id: 'settings', label: '系统设置', icon: Settings },
 ] as const;
 
@@ -45,7 +46,7 @@ export function Sidebar() {
         </svg>
         <div>
           <h1 className="font-bold text-lg tracking-tight text-surface-800 dark:text-surface-50">Ahy Governance</h1>
-          <p className="text-[10px] text-surface-500 font-medium uppercase tracking-widest">Community v0.8</p>
+          <p className="text-[10px] text-surface-500 font-medium uppercase tracking-widest">Community v0.8.0</p>
         </div>
       </div>
 
