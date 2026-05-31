@@ -1,9 +1,11 @@
 """
-SQLite persistence engine for Ahy Governance (open-source edition).
+Storage engine for Ahy Governance.
+
+Auto-detects backend from DATABASE_URL env var:
+- postgresql://... → PostgresDatabase (storage_pg.py)
+- sqlite://path or unset → SQLite Database (this file)
 
 All operational data is workspace-scoped via workspace_id.
-This is a minimal but functional implementation — the enterprise edition
-includes advanced features like tmpfs memory disk and SHA-256 audit chains.
 """
 
 from __future__ import annotations
@@ -12,6 +14,16 @@ import os
 import sqlite3
 import threading
 from typing import Any
+
+
+def create_database(url: str | None = None) -> Any:
+    """Factory: returns the right database backend based on DATABASE_URL."""
+    if url is None:
+        url = os.environ.get("DATABASE_URL", os.environ.get("AHY_DB_PATH", ""))
+    if url.startswith("postgresql://") or url.startswith("postgres://"):
+        from .storage_pg import PostgresDatabase
+        return PostgresDatabase(url)
+    return Database(url)
 
 
 class Database:
@@ -169,6 +181,45 @@ class Database:
             access_count INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (namespace, key, workspace_id)
         );
+
+        CREATE TABLE IF NOT EXISTS compliance_reports (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL DEFAULT '',
+            report_type TEXT NOT NULL DEFAULT '',
+            framework TEXT NOT NULL DEFAULT '',
+            compliance_score REAL NOT NULL DEFAULT 0,
+            data TEXT NOT NULL DEFAULT '{}'
+        );
+
+        CREATE TABLE IF NOT EXISTS anomalies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_id TEXT NOT NULL DEFAULT '',
+            anomaly_type TEXT NOT NULL,
+            agent_name TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            current_value REAL NOT NULL DEFAULT 0,
+            baseline_value REAL NOT NULL DEFAULT 0,
+            threshold REAL NOT NULL DEFAULT 0,
+            evidence TEXT NOT NULL DEFAULT '{}',
+            detected_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_anomaly_ws ON anomalies(workspace_id, detected_at);
+
+        CREATE TABLE IF NOT EXISTS cost_recommendations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_id TEXT NOT NULL DEFAULT '',
+            rec_type TEXT NOT NULL,
+            priority TEXT NOT NULL,
+            agent_name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            current_model TEXT NOT NULL DEFAULT '',
+            suggested_model TEXT NOT NULL DEFAULT '',
+            estimated_savings_usd REAL NOT NULL DEFAULT 0,
+            evidence TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_costrec_ws ON cost_recommendations(workspace_id, created_at);
         """)
         self._conn.commit()
 
@@ -423,6 +474,75 @@ class Database:
         )
         return row
 
+    # ── Compliance Reports (enterprise stub) ─────────────────
+
+    def compliance_report_insert(self, report_id: str, workspace_id: str,
+                                  report_type: str, framework: str,
+                                  score: float, data: str) -> None:
+        self._execute(
+            "INSERT OR REPLACE INTO compliance_reports (id, workspace_id, report_type, framework, compliance_score, data) VALUES (?, ?, ?, ?, ?, ?)",
+            (report_id, self._w(workspace_id), report_type, framework, score, data),
+        )
+
+    def compliance_report_get(self, report_id: str, workspace_id: str = "") -> dict | None:
+        return self._fetchone(
+            "SELECT * FROM compliance_reports WHERE id=? AND workspace_id=?",
+            (report_id, self._w(workspace_id)),
+        )
+
+    def compliance_report_latest(self, report_type: str, workspace_id: str = "") -> dict | None:
+        return self._fetchone(
+            "SELECT * FROM compliance_reports WHERE report_type=? AND workspace_id=? ORDER BY rowid DESC LIMIT 1",
+            (report_type, self._w(workspace_id)),
+        )
+
+    def compliance_reports_all(self, workspace_id: str = "") -> list[dict]:
+        return self._fetchall(
+            "SELECT * FROM compliance_reports WHERE workspace_id=? ORDER BY rowid DESC",
+            (self._w(workspace_id),),
+        )
+
+    # ── Anomalies ───────────────────────────────────────────
+
+    def anomaly_insert(self, anomaly_type: str, agent_name: str, severity: str,
+                       description: str, current_value: float, baseline_value: float,
+                       threshold: float, evidence: str, detected_at: str,
+                       workspace_id: str = "") -> None:
+        self._execute(
+            "INSERT INTO anomalies (workspace_id, anomaly_type, agent_name, severity, "
+            "description, current_value, baseline_value, threshold, evidence, detected_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (self._w(workspace_id), anomaly_type, agent_name, severity,
+             description, current_value, baseline_value, threshold, evidence, detected_at),
+        )
+
+    def anomalies_list(self, workspace_id: str = "", limit: int = 100) -> list[dict]:
+        return self._fetchall(
+            "SELECT * FROM anomalies WHERE workspace_id=? ORDER BY detected_at DESC LIMIT ?",
+            (self._w(workspace_id), limit),
+        )
+
+    # ── Cost Recommendations ───────────────────────────────────
+
+    def recommendation_insert(self, rec_type: str, priority: str, agent_name: str,
+                              description: str, current_model: str, suggested_model: str,
+                              estimated_savings_usd: float, evidence: str,
+                              created_at: str, workspace_id: str = "") -> None:
+        self._execute(
+            "INSERT INTO cost_recommendations (workspace_id, rec_type, priority, agent_name, "
+            "description, current_model, suggested_model, estimated_savings_usd, evidence, "
+            "created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (self._w(workspace_id), rec_type, priority, agent_name,
+             description, current_model, suggested_model, estimated_savings_usd,
+             evidence, created_at),
+        )
+
+    def recommendations_list(self, workspace_id: str = "", limit: int = 100) -> list[dict]:
+        return self._fetchall(
+            "SELECT * FROM cost_recommendations WHERE workspace_id=? ORDER BY created_at DESC LIMIT ?",
+            (self._w(workspace_id), limit),
+        )
+
     # ── Lifecycle ───────────────────────────────────────────
 
     def clear_all(self) -> None:
@@ -432,6 +552,7 @@ class Database:
             "conflicts", "audit_entries",
             "rbac_api_keys", "rbac_users", "rbac_workspaces",
             "memory_entries", "registered_agents",
+            "anomalies", "cost_recommendations",
         ]
         for t in tables:
             self._execute(f"DELETE FROM {t}")

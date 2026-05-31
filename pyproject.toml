@@ -1,6 +1,6 @@
 [project]
 name = "ahy-governance"
-version = "0.8.0"
+version = "0.9.0"
 description = "Multi-Agent Governance Platform — Conflict Detection, Cost Tracking, Audit Logging"
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -43,6 +43,12 @@ exclude = [
 
 [project.optional-dependencies]
 web = ["fastapi>=0.115", "uvicorn[standard]>=0.34", "httpx>=0.27"]
+postgres = ["sqlalchemy>=2.0", "psycopg2-binary>=2.9"]
+redis = ["redis>=5.0"]
+observability = ["structlog>=24.0"]
+security = ["bcrypt>=4.0", "PyJWT>=2.0"]
+crewai = ["crewai>=0.30"]
+prod = ["ahy-governance[postgres,redis,observability,web,security]"]
 
 [project.scripts]
 ahy-dashboard = "web.server:main"

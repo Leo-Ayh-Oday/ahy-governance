@@ -1,12 +1,13 @@
 """
 Conflict Detector — 跨 Agent 输出冲突检测引擎
 
-检测类型:
+检测类型（规则引擎）:
   FACT_CONFLICT       — 两个 Agent 对同一实体给出矛盾事实
   FORMAT_MISMATCH     — 上游输出格式与下游期望不匹配
   DEPENDENCY_BREAK    — 下游依赖的字段在上游输出中缺失
   SCOPE_OVERLAP       — 两个 Agent 产出了重复/重叠内容
   CONFIDENCE_CLASH    — Agent A 高置信度的结论与 Agent B 警告冲突
+  SEMANTIC_CONFLICT   — LLM 语义级矛盾检测（异步，source="semantic"）
 
 严重程度: CRITICAL > HIGH > MEDIUM > LOW
 
@@ -34,6 +35,7 @@ class ConflictType(Enum):
     DEPENDENCY_BREAK = "dependency_break"
     SCOPE_OVERLAP = "scope_overlap"
     CONFIDENCE_CLASH = "confidence_clash"
+    SEMANTIC_CONFLICT = "semantic_conflict"
 
 
 class Severity(Enum):
@@ -52,6 +54,7 @@ class Conflict:
     description: str
     evidence: dict = field(default_factory=dict)  # {agent_name: excerpt}
     suggestion: str = ""
+    source: str = "rule"  # "rule" | "semantic" — for auditability
 
     def to_dict(self) -> dict:
         return {
@@ -61,6 +64,7 @@ class Conflict:
             "description": self.description,
             "evidence": self.evidence,
             "suggestion": self.suggestion,
+            "source": self.source,
         }
 
     def to_sse(self) -> dict:
@@ -98,10 +102,15 @@ class ConflictDetector:
 
     在编排器每个 step 完成后调用 check()，传入当前所有 step_outputs。
     返回冲突列表 — 为空表示无冲突。
+
+    语义模式: enable_semantic=True 时，规则引擎结果立即返回，
+    语义检测异步运行，结果通过 semantic_results 属性追加。
     """
 
     fact_patterns: list[tuple] = field(default_factory=lambda: FACT_PATTERNS)
-    strict_mode: bool = False  # True: 任何冲突都 CRITICAL
+    strict_mode: bool = False
+    enable_semantic: bool = False
+    semantic_detector: object | None = None
 
     def check(
         self,
@@ -145,6 +154,28 @@ class ConflictDetector:
 
         # 5. 置信度冲突检测
         conflicts.extend(self._detect_confidence_clashes(results))
+
+        # 6. 语义冲突检测（异步，结果标记 source="semantic"）
+        if self.enable_semantic and self.semantic_detector:
+            try:
+                semantic_results = self.semantic_detector.detect_batch(
+                    {k: str(v) for k, v in results.items()},
+                    existing_conflicts=conflicts,
+                )
+                for sr in semantic_results:
+                    sev = {"HIGH": Severity.HIGH, "MEDIUM": Severity.MEDIUM,
+                           "LOW": Severity.LOW}.get(sr.severity, Severity.MEDIUM)
+                    conflicts.append(Conflict(
+                        conflict_type=ConflictType.SEMANTIC_CONFLICT,
+                        severity=sev,
+                        agents_involved=sr.agents_involved,
+                        description=sr.description,
+                        evidence={a: "" for a in sr.agents_involved},
+                        suggestion=sr.suggestion,
+                        source="semantic",
+                    ))
+            except Exception:
+                pass  # 语义检测失败不影响规则引擎结果
 
         return conflicts
 

@@ -51,6 +51,9 @@ class AuditEventType(Enum):
     HUMAN_REVIEW = "human_review"
     HUMAN_OVERRIDE = "human_override"
 
+    # Tool calls
+    TOOL_CALL = "tool_call"
+
     # Config & security
     CONFIG_CHANGE = "config_change"
     MODEL_CHANGE = "model_change"
@@ -115,13 +118,17 @@ def _utc_now() -> str:
 class AuditReporter:
     def __init__(self):
         self._entries: list[AuditEntry] = []
+        self._db = None
+
+    def set_database(self, db):
+        self._db = db
 
     # ── Logging ───────────────────────────────────────────────
 
     def log(
         self, event_type: AuditEventType, agent_name: str,
         details: dict | None = None, session_id: str = "",
-        timestamp: str | None = None,
+        timestamp: str | None = None, workspace_id: str = "",
     ) -> AuditEntry:
         details = details or {}
         index = len(self._entries)
@@ -144,11 +151,16 @@ class AuditReporter:
             hash=entry_hash, prev_hash=prev_hash,
         )
         self._entries.append(entry)
+        if self._db and self._db.enabled:
+            self._db.audit_insert(index, event_type.value, agent_name,
+                                   json.dumps(details, ensure_ascii=False),
+                                   session_id, ts, entry_hash, prev_hash,
+                                   workspace_id)
         return entry
 
     # ── Integrity ─────────────────────────────────────────────
 
-    def verify_integrity(self) -> bool:
+    def verify_integrity(self, workspace_id: str = "") -> bool:
         if not self._entries:
             return True
         prev = GENESIS_HASH
@@ -206,7 +218,7 @@ class AuditReporter:
             results = [e for e in results if e.session_id == session_id]
         return results
 
-    def recent(self, n: int = 20) -> list[AuditEntry]:
+    def recent(self, n: int = 20, workspace_id: str = "") -> list[AuditEntry]:
         if not self._entries:
             return []
         return list(reversed(self._entries[-n:]))

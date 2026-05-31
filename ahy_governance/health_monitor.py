@@ -132,22 +132,30 @@ class HealthMonitor:
         self._heartbeats: dict[str, Heartbeat] = {}
         self._calls: dict[str, list[dict]] = {}
         self._pipeline_runs: dict[str, PipelineRun] = {}
+        self._db = None  # set by server startup via set_database()
+
+    def set_database(self, db):
+        self._db = db
 
     # ── Heartbeat ─────────────────────────────────────────────
 
-    def heartbeat(self, agent_name: str, status: str, latency_ms: float) -> Heartbeat:
+    def heartbeat(self, agent_name: str, status: str, latency_ms: float,
+                  workspace_id: str = "") -> Heartbeat:
         hb = Heartbeat(
             agent_name=agent_name, status=status,
             latency_ms=latency_ms, timestamp=_utc_now(),
         )
         self._heartbeats[agent_name] = hb
+        if self._db and self._db.enabled:
+            self._db.heartbeat_upsert(agent_name, status, latency_ms,
+                                      hb.timestamp, workspace_id)
         return hb
 
     # ── Record Call ───────────────────────────────────────────
 
     def record_call(
         self, agent_name: str, success: bool, latency_ms: float,
-        session_id: str = "",
+        session_id: str = "", workspace_id: str = "",
     ):
         if agent_name not in self._calls:
             self._calls[agent_name] = []
@@ -156,6 +164,9 @@ class HealthMonitor:
             "latency_ms": latency_ms,
             "session_id": session_id,
         })
+        if self._db and self._db.enabled:
+            self._db.call_insert(agent_name, success, latency_ms,
+                                 session_id, _utc_now(), workspace_id)
 
     # ── Agent Health ──────────────────────────────────────────
 
@@ -163,8 +174,20 @@ class HealthMonitor:
         calls = self._calls.get(agent_name, [])
         hb = self._heartbeats.get(agent_name)
 
+        # Fallback to DB if no in-memory data
         if not calls and not hb:
-            return None
+            if self._db and self._db.enabled:
+                db_hb = self._db.heartbeat_get(agent_name)
+                if db_hb:
+                    hb = Heartbeat(
+                        agent_name=agent_name,
+                        status=db_hb.get("status", "unknown"),
+                        latency_ms=db_hb.get("latency_ms", 0),
+                        timestamp=db_hb.get("timestamp", ""),
+                    )
+                    self._heartbeats[agent_name] = hb  # hydrate memory
+            if not calls and not hb:
+                return None
 
         success = sum(1 for c in calls if c["success"])
         errors = sum(1 for c in calls if not c["success"])
@@ -183,8 +206,12 @@ class HealthMonitor:
         metrics.status = self._derive_status(metrics)
         return metrics
 
-    def get_all_health(self) -> dict[str, AgentMetrics]:
+    def get_all_health(self, workspace_id: str = "") -> dict[str, AgentMetrics]:
         agents = set(self._heartbeats.keys()) | set(self._calls.keys())
+        # Merge agents from DB
+        if self._db and self._db.enabled:
+            for row in self._db.heartbeat_all(workspace_id):
+                agents.add(row["agent_name"])
         result = {}
         for name in agents:
             m = self.get_agent_health(name)
@@ -261,12 +288,63 @@ class HealthMonitor:
 
     # ── Unhealthy Agents ──────────────────────────────────────
 
-    def get_unhealthy_agents(self) -> list[AgentMetrics]:
-        all_h = self.get_all_health()
+    def get_unhealthy_agents(self, workspace_id: str = "") -> list[AgentMetrics]:
+        all_h = self.get_all_health(workspace_id)
         return [
             m for m in all_h.values()
             if m.status in (AgentStatus.UNHEALTHY, AgentStatus.OFFLINE)
         ]
+
+    # ── Agent Registry ────────────────────────────────────────
+
+    def agent_register(self, agent_id: str, workspace_id: str, agent_name: str,
+                        model: str, upstream_url: str, created_at: str) -> None:
+        if self._db and self._db.enabled:
+            self._db.agent_register(agent_id, workspace_id, agent_name,
+                                     model, upstream_url, created_at)
+        # Also seed in-memory heartbeat so agent appears in health views immediately
+        self._heartbeats.setdefault(agent_name, Heartbeat(
+            agent_name=agent_name, status="ok", latency_ms=0,
+            timestamp=created_at,
+        ))
+
+    def agent_list(self, workspace_id: str = "") -> list[dict]:
+        if self._db and self._db.enabled:
+            return self._db.agent_list(workspace_id)
+        return []
+
+    def agent_get(self, agent_id: str) -> dict | None:
+        if self._db and self._db.enabled:
+            return self._db.agent_get(agent_id)
+        return None
+
+    def agent_delete(self, agent_id: str) -> bool:
+        if self._db and self._db.enabled:
+            return self._db.agent_delete(agent_id)
+        return False
+
+    # ── DB-backed queries ─────────────────────────────────────
+
+    def calls_error_count(self, agent_name: str, workspace_id: str = "") -> int:
+        if self._db and self._db.enabled:
+            return self._db.calls_error_count(agent_name, workspace_id)
+        return 0
+
+    def calls_count_by_agent(self, agent_name: str, workspace_id: str = "") -> int:
+        if self._db and self._db.enabled:
+            return self._db.calls_count_by_agent(agent_name, workspace_id)
+        return 0
+
+    def calls_success_count(self, agent_name: str, workspace_id: str = "") -> int:
+        if self._db and self._db.enabled:
+            return self._db.calls_success_count(agent_name, workspace_id)
+        return 0
+
+    def calls_latencies(self, agent_name: str, limit: int = 500,
+                        workspace_id: str = "") -> list[float]:
+        if self._db and self._db.enabled:
+            return self._db.calls_latencies(agent_name, limit, workspace_id)
+        return []
 
     # ── Pipeline DAG ──────────────────────────────────────────
 
@@ -321,7 +399,7 @@ class HealthMonitor:
 
     # ── Dashboard ─────────────────────────────────────────────
 
-    def get_dashboard_data(self) -> dict:
+    def get_dashboard_data(self, workspace_id: str = "") -> dict:
         agents_data = []
         all_h = self.get_all_health()
         healthy = 0

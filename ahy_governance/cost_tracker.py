@@ -146,6 +146,10 @@ class CostTracker:
         self._pricing: dict[str, ModelPricing] = {
             p.model_id: p for p in DEFAULT_PRICING
         }
+        self._db = None
+
+    def set_database(self, db):
+        self._db = db
 
     # ── Pricing ──────────────────────────────────────────────
 
@@ -177,7 +181,7 @@ class CostTracker:
 
     def track(
         self, agent_name: str, model: str, tokens_in: int,
-        tokens_out: int, session_id: str = "",
+        tokens_out: int, session_id: str = "", workspace_id: str = "",
     ) -> CostEntry:
         pricing = self.get_pricing(model)
         if pricing is None:
@@ -200,6 +204,9 @@ class CostTracker:
                     self._budget.period,
                 )
 
+        if self._db and self._db.enabled:
+            self._db.cost_insert(agent_name, model, tokens_in, tokens_out,
+                                 cost, session_id, entry.timestamp, workspace_id)
         return entry
 
     # ── Queries ──────────────────────────────────────────────
@@ -236,11 +243,15 @@ class CostTracker:
     def set_budget(
         self, limit_usd: float, period: str = "monthly",
         alert_threshold: float = 0.8, auto_block: bool = True,
+        workspace_id: str = "",
     ) -> BudgetConfig:
         self._budget = BudgetConfig(
             limit_usd=limit_usd, period=period,
             alert_threshold=alert_threshold, auto_block=auto_block,
         )
+        if self._db and self._db.enabled:
+            self._db.budget_upsert(limit_usd, period, 0.0,
+                                    alert_threshold, auto_block, workspace_id)
         return self._budget
 
     def check_budget(self) -> float:
@@ -254,7 +265,7 @@ class CostTracker:
             )
         return self._budget.remaining
 
-    def get_budget_status(self) -> dict | None:
+    def get_budget_status(self, workspace_id: str = "") -> dict | None:
         if self._budget is None:
             return None
         return {
@@ -271,7 +282,7 @@ class CostTracker:
 
     # ── Report ───────────────────────────────────────────────
 
-    def get_report(self) -> dict:
+    def get_report(self, workspace_id: str = "") -> dict:
         """Comprehensive cost report by agent, session, and model."""
         by_agent: dict[str, float] = {}
         by_session: dict[str, float] = {}

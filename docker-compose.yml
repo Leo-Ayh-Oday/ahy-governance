@@ -1,16 +1,17 @@
 # ── ahyops — AI Agent Governance Platform ──────────────────
 # One command deployment. No cloud dependency.
 #
-# Quick start (HTTP only):
+# Quick start (HTTP only, SQLite):
 #   docker compose up -d
 #   # Dashboard at http://localhost
 #
+# Production (PostgreSQL + Redis):
+#   docker compose --profile prod up -d
+#
 # With HTTPS (production):
 #   1. Put SSL certs in nginx/ssl/ (ahyops.cn.pem + ahyops.cn.key)
-#   2. docker compose up -d
+#   2. docker compose --profile prod up -d
 #   3. Dashboard at https://ahyops.cn
-#
-# For China server, set pip mirror in Dockerfile already done.
 
 version: "3.8"
 
@@ -22,17 +23,63 @@ services:
       - "8080"
     environment:
       AHY_DB_PATH: /app/data/ahy_governance.db
+      DATABASE_URL: ${DATABASE_URL:-}
+      REDIS_URL: ${REDIS_URL:-}
       UPSTREAM_OPENAI_BASE: https://api.deepseek.com
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
+      - ahyops_data:/app/data
       - ahyops_backup:/app/data_backup
-    tmpfs:
-      - /app/data:size=512M
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+        required: false
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/proxy/health"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # ── PostgreSQL (optional, profile: prod) ──────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: ahyops-pg
+    profiles: ["prod"]
+    environment:
+      POSTGRES_USER: ahy
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-ahy_secret_change_me}
+      POSTGRES_DB: ahy_governance
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ahy -d ahy_governance"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Redis (optional, profile: prod) ───────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: ahyops-redis
+    profiles: ["prod"]
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
   nginx:
     image: nginx:alpine
@@ -49,4 +96,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  ahyops_data:
   ahyops_backup:
+  pg_data:
+  redis_data:

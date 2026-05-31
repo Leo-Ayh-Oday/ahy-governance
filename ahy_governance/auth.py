@@ -14,6 +14,7 @@ Usage:
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import sqlite3
@@ -21,6 +22,22 @@ import time
 from base64 import urlsafe_b64encode
 from dataclasses import dataclass
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
+
+# Optional bcrypt for password hashing (pip install ahy-governance[security])
+try:
+    import bcrypt as _bcrypt
+    _HAS_BCRYPT = True
+except ImportError:
+    _HAS_BCRYPT = False
+
+# Optional PyJWT for proper JWT handling (pip install ahy-governance[security])
+try:
+    import jwt as _pyjwt
+    _HAS_PYJWT = True
+except ImportError:
+    _HAS_PYJWT = False
 
 
 # ── Constants ─────────────────────────────────────────────────────
@@ -33,14 +50,27 @@ API_KEY_PREFIX = "ahy_"
 # ── Helpers ────────────────────────────────────────────────────────
 
 def _hash_password(password: str) -> str:
+    if _HAS_BCRYPT:
+        return _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
+    # Fallback: SHA-256 with random salt (legacy)
     salt = secrets.token_hex(16)
     h = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
     return f"{salt}:{h}"
 
 
 def _verify_password(password: str, stored: str) -> bool:
-    salt, h = stored.split(":", 1)
-    return hashlib.sha256(f"{salt}:{password}".encode()).hexdigest() == h
+    if stored.startswith("$2b$") or stored.startswith("$2a$"):
+        if _HAS_BCRYPT:
+            return _bcrypt.checkpw(password.encode("utf-8"), stored.encode("utf-8"))
+        # bcrypt hash present but bcrypt not installed — cannot verify
+        logger.warning("bcrypt hash found but bcrypt not installed; install with: pip install ahy-governance[security]")
+        return False
+    # Legacy SHA-256 format: salt:hash
+    try:
+        salt, h = stored.split(":", 1)
+        return hashlib.sha256(f"{salt}:{password}".encode()).hexdigest() == h
+    except ValueError:
+        return False
 
 
 def _hash_key(key: str) -> str:
@@ -51,7 +81,7 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-# ── JWT (hand-rolled, no external deps) ───────────────────────────
+# ── JWT ───────────────────────────────────────────────────────────
 
 import base64 as _base64
 
@@ -62,6 +92,9 @@ def _b64_decode(s: str) -> bytes:
     return _base64.urlsafe_b64decode(s + "=" * (4 - len(s) % 4))
 
 def _make_jwt(payload: dict) -> str:
+    if _HAS_PYJWT:
+        return _pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    # Fallback: hand-rolled JWT (legacy)
     header = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
     body = _b64(json.dumps(payload).encode())
     signature = _b64(hmac.new(JWT_SECRET.encode(), f"{header}.{body}".encode(), hashlib.sha256).digest())
@@ -69,6 +102,15 @@ def _make_jwt(payload: dict) -> str:
 
 
 def _verify_jwt(token: str) -> dict | None:
+    if _HAS_PYJWT:
+        try:
+            return _pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        except _pyjwt.ExpiredSignatureError:
+            return None
+        except _pyjwt.InvalidTokenError:
+            # Might be a legacy hand-rolled token — try fallback
+            pass
+    # Fallback: hand-rolled JWT verification
     try:
         header, body, signature = token.split(".")
         expected = _b64(hmac.new(JWT_SECRET.encode(), f"{header}.{body}".encode(), hashlib.sha256).digest())
@@ -141,6 +183,17 @@ class AuthManager:
             ).fetchone()
         if not row or not _verify_password(password, row[2]):
             raise ValueError("Invalid email or password")
+
+        # Transparent upgrade: re-hash old SHA-256 passwords with bcrypt on login
+        if _HAS_BCRYPT and not row[2].startswith("$2b$") and not row[2].startswith("$2a$"):
+            new_hash = _hash_password(password)
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    "UPDATE users SET password_hash = ? WHERE id = ?",
+                    (new_hash, row[0]),
+                )
+                conn.commit()
+
         token = _make_jwt({
             "sub": row[0],
             "email": row[1],
