@@ -16,3 +16,21 @@ venv/
 nginx/ssl/*.pem
 nginx/ssl/*.key
 !nginx/ssl/.gitkeep
+
+# Build artifacts
+web/static/assets/
+web/node_modules/
+web/package-lock.json
+
+# Data & media
+data/
+promo-video/
+content/
+
+# IDE / editor
+.wolf/
+.codegraph/
+.claude/
+
+# Auth database
+auth.db

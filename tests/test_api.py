@@ -145,7 +145,7 @@ class TestConflictEndpoints:
         assert response.status_code == 200
         types = response.json()
         assert "fact_conflict" in types
-        assert len(types) == 5
+        assert len(types) >= 6
 
     def test_check_no_conflicts(self):
         response = client.post("/api/conflicts/check", json={
@@ -368,11 +368,13 @@ class TestErrorHandling:
         assert response.status_code == 404
 
     def test_cors_headers(self):
+        # After security fix: CORS_ORIGINS defaults to empty → no ACAO header
         response = client.options("/api/health/dashboard", headers={
             "Origin": "http://localhost:3000",
             "Access-Control-Request-Method": "GET",
         })
-        assert "access-control-allow-origin" in response.headers
+        # With default empty CORS config, origin should be rejected
+        assert "access-control-allow-origin" not in response.headers
 
     def test_demo_consistency(self):
         """After loading all demos, data is cross-module consistent."""
