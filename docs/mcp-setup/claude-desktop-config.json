@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "ahy-governance": {
+      "command": "ahy-governance-mcp",
+      "env": {
+        "AHY_DB_PATH": "~/.ahy/ahy_governance.db"
+      }
+    }
+  }
+}
