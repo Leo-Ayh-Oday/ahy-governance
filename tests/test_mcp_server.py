@@ -445,13 +445,15 @@ class TestSelfHealTools:
     def test_ahy_self_heal_with_level_override(self, mock_get):
         from ahy_governance.self_healer import SelfHealLevel
         mock_healer = MagicMock()
-        mock_healer.level = SelfHealLevel.RULE_ONLY
         mock_result = MagicMock()
         mock_result.to_dict.return_value = {"agent_name": "A", "status": "attempted", "diagnosed_by": "rule", "incident_type": "timeout", "action": None, "detail": ""}
         mock_healer.self_heal.return_value = mock_result
         mock_get.return_value = mock_healer
         ahy_self_heal("A", "timeout", "err", self_heal_level="full_auto")
-        assert mock_healer.level == SelfHealLevel.FULL_AUTO
+        # Verify level_override passed without mutating singleton
+        mock_healer.self_heal.assert_called_once()
+        call_kwargs = mock_healer.self_heal.call_args[1]
+        assert call_kwargs["level_override"] == SelfHealLevel.FULL_AUTO
 
     @patch("ahy_governance.self_healer.get_healer")
     def test_ahy_list_recovery_rules(self, mock_get):

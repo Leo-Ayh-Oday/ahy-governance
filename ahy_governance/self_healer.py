@@ -326,10 +326,36 @@ class SelfHealer:
     def self_heal(
         self, agent_name: str, incident_type: IncidentType,
         error_message: str, context: dict | None = None,
-        workspace_id: str = "",
+        workspace_id: str = "", level_override: SelfHealLevel | None = None,
     ) -> HealResult:
-        """Attempt self-healing with progressive escalation."""
+        """Attempt self-healing with progressive escalation.
+
+        Args:
+            level_override: If set, use this level for this call only
+                (does not mutate self.level).
+        """
+        effective_level = level_override or self.level
         context = context or {}
+        cleanup = False
+        if level_override is not None:
+            original_level = self.level
+            self.level = level_override
+            cleanup = True
+        try:
+            return self._self_heal_impl(
+                agent_name, incident_type, error_message, context,
+                workspace_id, effective_level,
+            )
+        finally:
+            if cleanup:
+                self.level = original_level
+
+    def _self_heal_impl(
+        self, agent_name: str, incident_type: IncidentType,
+        error_message: str, context: dict,
+        workspace_id: str, effective_level: SelfHealLevel,
+    ) -> HealResult:
+        """Internal implementation — callers should use self_heal()."""
 
         # Step 1: Rule Engine
         rule = self._rule_engine.match(incident_type, error_message)
@@ -347,31 +373,34 @@ class SelfHealer:
             )
 
         # Step 2: Recovery Ledger lookup
-        if self.level in (SelfHealLevel.LLM_ASSISTED, SelfHealLevel.FULL_AUTO):
+        if effective_level in (SelfHealLevel.LLM_ASSISTED, SelfHealLevel.FULL_AUTO):
             similar = self._ledger.find_similar(incident_type, error_message, workspace_id)
             if similar:
-                best = similar[0]
-                if best.get("success"):
-                    action = RecoveryAction(
-                        action_type=RecoveryActionType(best["recovery_action"]),
-                        description=f"从历史记录学习: {best['recovery_action']}",
-                        params=json.loads(best.get("evidence", "{}")),
-                        confidence=min(best.get("confidence", 0.5) + 0.1, 0.9),
-                        source="ledger",
-                    )
-                    return self._finalize(
-                        agent_name, incident_type, error_message, action,
-                        RecoveryStatus.ATTEMPTED, "ledger", workspace_id, context,
-                    )
+                try:
+                    best = similar[0]
+                    if best.get("success"):
+                        action = RecoveryAction(
+                            action_type=RecoveryActionType(best["recovery_action"]),
+                            description=f"从历史记录学习: {best['recovery_action']}",
+                            params=json.loads(best.get("evidence", "{}")),
+                            confidence=min(best.get("confidence", 0.5) + 0.1, 0.9),
+                            source="ledger",
+                        )
+                        return self._finalize(
+                            agent_name, incident_type, error_message, action,
+                            RecoveryStatus.ATTEMPTED, "ledger", workspace_id, context,
+                        )
+                except (ValueError, KeyError, json.JSONDecodeError):
+                    pass  # Corrupted ledger entry — fall through to next layer
 
         # Step 3: LLM Doctor
-        if self.level in (SelfHealLevel.LLM_ASSISTED, SelfHealLevel.FULL_AUTO):
+        if effective_level in (SelfHealLevel.LLM_ASSISTED, SelfHealLevel.FULL_AUTO):
             llm_action = self._llm_doctor.diagnose(
                 agent_name, incident_type, error_message, context,
             )
             if llm_action is not None:
                 llm_action.source = "llm"
-                status = (RecoveryStatus.ATTEMPTED if self.level == SelfHealLevel.FULL_AUTO
+                status = (RecoveryStatus.ATTEMPTED if effective_level == SelfHealLevel.FULL_AUTO
                           else RecoveryStatus.ESCALATED)
                 return self._finalize(
                     agent_name, incident_type, error_message, llm_action,
@@ -459,8 +488,8 @@ class SelfHealer:
                 "action": action.action_type.value,
                 "source": action.source,
                 "confidence": action.confidence,
-                "workspace_id": workspace_id,
             },
+            workspace_id=workspace_id,
         )
 
     def reset(self):

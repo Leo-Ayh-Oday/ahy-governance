@@ -186,17 +186,22 @@ def ahy_self_heal(
     """Trigger self-healing for an agent. incident_type: hallucination, execution_error, timeout, rate_limit, auth_error, token_spike, memory_exhausted, dependency_failure, output_invalid, unknown. self_heal_level (optional override): rule_only, llm_assisted, full_auto."""
     from .self_healer import get_healer, SelfHealLevel, IncidentType
     healer = get_healer()
+    level_override = None
     if self_heal_level:
         try:
-            healer.level = SelfHealLevel(self_heal_level)
+            level_override = SelfHealLevel(self_heal_level)
         except ValueError:
             pass
     try:
         it = IncidentType(incident_type)
     except ValueError:
         it = IncidentType.UNKNOWN
-    ctx = json.loads(context_json) if context_json else {}
-    result = healer.self_heal(agent_name, it, error_message, ctx)
+    try:
+        ctx = json.loads(context_json) if context_json else {}
+    except json.JSONDecodeError:
+        return json.dumps({"error": "Invalid JSON in context_json"}, ensure_ascii=False)
+    result = healer.self_heal(agent_name, it, error_message, ctx,
+                              level_override=level_override)
     return _to_json(result)
 
 
