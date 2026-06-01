@@ -42,6 +42,7 @@ class TriggerType(Enum):
     COMPLIANCE_VIOLATION = "compliance_violation"
     AGENT_ERROR = "agent_error"
     AGENT_LEVEL_EVALUATED = "agent_level_evaluated"
+    SELF_HEAL_ESCALATION = "self_heal_escalation"
 
 
 # ── Agent Level Grading ──────────────────────────────────────────
@@ -155,6 +156,8 @@ class GovernanceStrategy:
     needs_circuit_breaker: bool = False
     needs_realtime_alerts: bool = False
     needs_human_fallback: bool = False
+    needs_self_healing: bool = False
+    self_healing_level: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -173,6 +176,8 @@ class GovernanceStrategy:
             "needs_circuit_breaker": self.needs_circuit_breaker,
             "needs_realtime_alerts": self.needs_realtime_alerts,
             "needs_human_fallback": self.needs_human_fallback,
+            "needs_self_healing": self.needs_self_healing,
+            "self_healing_level": self.self_healing_level,
         }
 
 
@@ -245,6 +250,8 @@ AGENT_LEVEL_STRATEGIES: dict[AgentLevel, GovernanceStrategy] = {
         needs_rbac=True,
         needs_circuit_breaker=True,
         needs_human_fallback=True,
+        needs_self_healing=True,
+        self_healing_level="rule_only",
     ),
     AgentLevel.LEVEL_5: GovernanceStrategy(
         level=AgentLevel.LEVEL_5,
@@ -254,7 +261,7 @@ AGENT_LEVEL_STRATEGIES: dict[AgentLevel, GovernanceStrategy] = {
             "audit_log", "cost_tracking", "conflict_detection",
             "anomaly_detection", "auto_resolution", "prompt_guard",
             "rbac", "circuit_breaker", "realtime_alerts",
-            "checkpoint_recovery", "budget_enforcement",
+            "checkpoint_recovery", "budget_enforcement", "self_healing",
         ],
         risk_classes_allowed=[r for r in RiskClass],  # all risk classes
         needs_conflict_detection=True,
@@ -265,6 +272,8 @@ AGENT_LEVEL_STRATEGIES: dict[AgentLevel, GovernanceStrategy] = {
         needs_circuit_breaker=True,
         needs_realtime_alerts=True,
         needs_human_fallback=True,
+        needs_self_healing=True,
+        self_healing_level="llm_assisted",
     ),
 }
 

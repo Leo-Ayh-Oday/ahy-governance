@@ -97,6 +97,25 @@ from .auto_resolver import (
     auto_resolve,
 )
 
+# ── Self Healer ────────────────────────────────────────────────
+from .self_healer import (
+    SelfHealer,
+    SelfHealLevel,
+    RecoveryActionType,
+    IncidentType,
+    RecoveryAction,
+    RecoveryRule,
+    RecoveryLedgerEntry,
+    HealResult,
+    RuleEngine,
+    LLMDoctor,
+    RecoveryLedger,
+    RecoveryStatus,
+    get_healer,
+    self_heal,
+)
+from .recovery_rules import default_recovery_rules
+
 # ── Cost Advisor ────────────────────────────────────────────────
 from .cost_advisor import (
     CostAdvisor,
@@ -155,7 +174,7 @@ except ImportError:
     recommend_strategy = None
     AGENT_LEVEL_STRATEGIES = None
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 __all__ = [
     # Conflict Detector
     "ConflictDetector",
@@ -242,6 +261,22 @@ __all__ = [
     "ResolutionStrategy",
     "get_resolver",
     "auto_resolve",
+    # Self Healer
+    "SelfHealer",
+    "SelfHealLevel",
+    "RecoveryActionType",
+    "IncidentType",
+    "RecoveryAction",
+    "RecoveryRule",
+    "RecoveryLedgerEntry",
+    "HealResult",
+    "RuleEngine",
+    "LLMDoctor",
+    "RecoveryLedger",
+    "RecoveryStatus",
+    "get_healer",
+    "self_heal",
+    "default_recovery_rules",
     # SDK Decorator
     "track",
     # Cost Advisor

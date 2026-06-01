@@ -173,6 +173,64 @@ def ahy_detect_anomalies() -> str:
     return _to_json(anomalies)
 
 
+# ── Self-Healing Tools ──────────────────────────────────────────
+
+@mcp.tool()
+def ahy_self_heal(
+    agent_name: str,
+    incident_type: str,
+    error_message: str,
+    context_json: str = "",
+    self_heal_level: str = "",
+) -> str:
+    """Trigger self-healing for an agent. incident_type: hallucination, execution_error, timeout, rate_limit, auth_error, token_spike, memory_exhausted, dependency_failure, output_invalid, unknown. self_heal_level (optional override): rule_only, llm_assisted, full_auto."""
+    from .self_healer import get_healer, SelfHealLevel, IncidentType
+    healer = get_healer()
+    if self_heal_level:
+        try:
+            healer.level = SelfHealLevel(self_heal_level)
+        except ValueError:
+            pass
+    try:
+        it = IncidentType(incident_type)
+    except ValueError:
+        it = IncidentType.UNKNOWN
+    ctx = json.loads(context_json) if context_json else {}
+    result = healer.self_heal(agent_name, it, error_message, ctx)
+    return _to_json(result)
+
+
+@mcp.tool()
+def ahy_list_recovery_rules() -> str:
+    """List all current recovery rules in the self-healing rule library."""
+    from .self_healer import get_healer
+    healer = get_healer()
+    rules = [r.to_dict() for r in healer.rules]
+    return json.dumps(rules, ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+def ahy_recovery_history(
+    agent_name: str = "",
+    incident_type: str = "",
+    workspace_id: str = "",
+    limit: int = 100,
+) -> str:
+    """Query the recovery ledger for past self-healing incidents."""
+    db = _ensure_db()
+    from .self_healer import get_healer
+    healer = get_healer()
+    if healer.ledger._db is None:
+        healer.set_database(db)
+    entries = healer.ledger.query(
+        agent_name=agent_name,
+        incident_type=incident_type,
+        workspace_id=workspace_id,
+        limit=limit,
+    )
+    return json.dumps(entries, ensure_ascii=False, indent=2, default=str)
+
+
 # ── Memory Tools ──────────────────────────────────────────────
 
 @mcp.tool()

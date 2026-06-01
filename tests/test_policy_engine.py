@@ -597,3 +597,35 @@ class TestLevelRuleEvaluation:
             },
         )
         assert ActionType.BLOCK in actions
+
+
+class TestSelfHealingPolicy:
+    def test_level_4_has_rule_only_self_healing(self):
+        s = AGENT_LEVEL_STRATEGIES[AgentLevel.LEVEL_4]
+        assert s.needs_self_healing is True
+        assert s.self_healing_level == "rule_only"
+
+    def test_level_5_has_llm_assisted_self_healing(self):
+        s = AGENT_LEVEL_STRATEGIES[AgentLevel.LEVEL_5]
+        assert s.needs_self_healing is True
+        assert s.self_healing_level == "llm_assisted"
+
+    def test_level_0_no_self_healing(self):
+        s = AGENT_LEVEL_STRATEGIES[AgentLevel.LEVEL_0]
+        assert s.needs_self_healing is False
+        assert s.self_healing_level == ""
+
+    def test_level_3_no_self_healing(self):
+        s = AGENT_LEVEL_STRATEGIES[AgentLevel.LEVEL_3]
+        assert s.needs_self_healing is False
+        assert s.self_healing_level == ""
+
+    def test_to_dict_includes_self_healing(self):
+        s = AGENT_LEVEL_STRATEGIES[AgentLevel.LEVEL_4]
+        d = s.to_dict()
+        assert d["needs_self_healing"] is True
+        assert d["self_healing_level"] == "rule_only"
+
+    def test_level_5_required_controls_include_self_healing(self):
+        s = AGENT_LEVEL_STRATEGIES[AgentLevel.LEVEL_5]
+        assert "self_healing" in s.required_controls

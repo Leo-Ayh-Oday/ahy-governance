@@ -59,6 +59,12 @@ class AuditEventType(Enum):
     MODEL_CHANGE = "model_change"
     PERMISSION_DENIED = "permission_denied"
 
+    # Self-healing events
+    SELF_HEAL_ATTEMPTED = "self_heal_attempted"
+    SELF_HEAL_SUCCEEDED = "self_heal_succeeded"
+    SELF_HEAL_FAILED = "self_heal_failed"
+    SELF_HEAL_ESCALATED = "self_heal_escalated"
+
 
 # ── Genesis hash ────────────────────────────────────────────────
 

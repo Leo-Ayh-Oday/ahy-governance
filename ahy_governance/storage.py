@@ -220,6 +220,34 @@ class Database:
             created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_costrec_ws ON cost_recommendations(workspace_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS recovery_ledger (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_id TEXT NOT NULL DEFAULT '',
+            agent_name TEXT NOT NULL,
+            incident_type TEXT NOT NULL,
+            error_message TEXT NOT NULL DEFAULT '',
+            recovery_action TEXT NOT NULL DEFAULT '',
+            diagnosed_by TEXT NOT NULL DEFAULT 'rule',
+            success INTEGER NOT NULL DEFAULT 0,
+            confidence REAL NOT NULL DEFAULT 0.0,
+            evidence TEXT NOT NULL DEFAULT '{}',
+            timestamp TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_rl_agent ON recovery_ledger(agent_name, workspace_id);
+        CREATE INDEX IF NOT EXISTS idx_rl_type ON recovery_ledger(incident_type);
+
+        CREATE TABLE IF NOT EXISTS recovery_rules (
+            rule_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL DEFAULT '',
+            name TEXT NOT NULL,
+            incident_type TEXT NOT NULL,
+            pattern TEXT NOT NULL DEFAULT '',
+            recovery_action TEXT NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 50,
+            cooldown_seconds INTEGER NOT NULL DEFAULT 300,
+            enabled INTEGER NOT NULL DEFAULT 1
+        );
         """)
         self._conn.commit()
 
@@ -543,6 +571,67 @@ class Database:
             (self._w(workspace_id), limit),
         )
 
+    # ── Recovery Ledger ────────────────────────────────────────
+
+    def recovery_ledger_insert(self, agent_name: str, incident_type: str,
+                               error_message: str, recovery_action: str,
+                               diagnosed_by: str, success: bool, confidence: float,
+                               evidence: str, timestamp: str, workspace_id: str = "") -> int:
+        cur = self._execute(
+            "INSERT INTO recovery_ledger (workspace_id, agent_name, incident_type, "
+            "error_message, recovery_action, diagnosed_by, success, confidence, "
+            "evidence, timestamp) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (self._w(workspace_id), agent_name, incident_type, error_message,
+             recovery_action, diagnosed_by, 1 if success else 0, confidence,
+             evidence, timestamp),
+        )
+        return cur.lastrowid
+
+    def recovery_ledger_list(self, agent_name: str = "", incident_type: str = "",
+                             workspace_id: str = "", limit: int = 100) -> list[dict]:
+        conditions = ["workspace_id=?"]
+        params: list = [self._w(workspace_id)]
+        if agent_name:
+            conditions.append("agent_name=?")
+            params.append(agent_name)
+        if incident_type:
+            conditions.append("incident_type=?")
+            params.append(incident_type)
+        where = " AND ".join(conditions)
+        return self._fetchall(
+            f"SELECT * FROM recovery_ledger WHERE {where} ORDER BY timestamp DESC LIMIT ?",
+            tuple(params + [limit]),
+        )
+
+    def recovery_ledger_similar(self, incident_type: str, error_message: str,
+                                workspace_id: str = "", limit: int = 5) -> list[dict]:
+        return self._fetchall(
+            "SELECT * FROM recovery_ledger WHERE workspace_id=? AND incident_type=? "
+            "AND success=1 ORDER BY timestamp DESC LIMIT ?",
+            (self._w(workspace_id), incident_type, limit),
+        )
+
+    # ── Recovery Rules ─────────────────────────────────────────
+
+    def recovery_rules_list(self, workspace_id: str = "") -> list[dict]:
+        return self._fetchall(
+            "SELECT * FROM recovery_rules WHERE workspace_id=? ORDER BY priority",
+            (self._w(workspace_id),),
+        )
+
+    def recovery_rules_upsert(self, rule_id: str, name: str, incident_type: str,
+                              pattern: str, recovery_action: str, priority: int,
+                              cooldown_seconds: int, enabled: bool,
+                              workspace_id: str = "") -> None:
+        self._execute(
+            "INSERT OR REPLACE INTO recovery_rules (rule_id, workspace_id, name, "
+            "incident_type, pattern, recovery_action, priority, cooldown_seconds, enabled) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (rule_id, self._w(workspace_id), name, incident_type,
+             pattern, recovery_action, priority, cooldown_seconds,
+             1 if enabled else 0),
+        )
+
     # ── Lifecycle ───────────────────────────────────────────
 
     def clear_all(self) -> None:
@@ -553,6 +642,7 @@ class Database:
             "rbac_api_keys", "rbac_users", "rbac_workspaces",
             "memory_entries", "registered_agents",
             "anomalies", "cost_recommendations",
+            "recovery_ledger", "recovery_rules",
         ]
         for t in tables:
             self._execute(f"DELETE FROM {t}")

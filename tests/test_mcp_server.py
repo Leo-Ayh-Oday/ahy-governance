@@ -28,6 +28,9 @@ from ahy_governance.mcp_server import (
     ahy_send_alert,
     ahy_verify_audit_integrity,
     ahy_get_dashboard,
+    ahy_self_heal,
+    ahy_list_recovery_rules,
+    ahy_recovery_history,
 )
 
 
@@ -416,6 +419,73 @@ class TestAdminToolsDisabled:
 
 
 # ── Smoke: MCP server imports ─────────────────────────────────
+
+class TestSelfHealTools:
+    @patch("ahy_governance.self_healer.get_healer")
+    def test_ahy_self_heal(self, mock_get):
+        mock_healer = MagicMock()
+        mock_result = MagicMock()
+        mock_result.to_dict.return_value = {"agent_name": "Planner", "status": "attempted", "diagnosed_by": "rule", "incident_type": "timeout", "action": None, "detail": ""}
+        mock_healer.self_heal.return_value = mock_result
+        mock_get.return_value = mock_healer
+        result = json.loads(ahy_self_heal("Planner", "timeout", "timed out"))
+        assert result["agent_name"] == "Planner"
+
+    @patch("ahy_governance.self_healer.get_healer")
+    def test_ahy_self_heal_invalid_incident_type(self, mock_get):
+        mock_healer = MagicMock()
+        mock_result = MagicMock()
+        mock_result.to_dict.return_value = {"agent_name": "A", "incident_type": "unknown", "status": "escalated", "diagnosed_by": "system", "action": None, "detail": ""}
+        mock_healer.self_heal.return_value = mock_result
+        mock_get.return_value = mock_healer
+        result = json.loads(ahy_self_heal("A", "bad_type_xyz", "error"))
+        assert result["incident_type"] == "unknown"
+
+    @patch("ahy_governance.self_healer.get_healer")
+    def test_ahy_self_heal_with_level_override(self, mock_get):
+        from ahy_governance.self_healer import SelfHealLevel
+        mock_healer = MagicMock()
+        mock_healer.level = SelfHealLevel.RULE_ONLY
+        mock_result = MagicMock()
+        mock_result.to_dict.return_value = {"agent_name": "A", "status": "attempted", "diagnosed_by": "rule", "incident_type": "timeout", "action": None, "detail": ""}
+        mock_healer.self_heal.return_value = mock_result
+        mock_get.return_value = mock_healer
+        ahy_self_heal("A", "timeout", "err", self_heal_level="full_auto")
+        assert mock_healer.level == SelfHealLevel.FULL_AUTO
+
+    @patch("ahy_governance.self_healer.get_healer")
+    def test_ahy_list_recovery_rules(self, mock_get):
+        mock_healer = MagicMock()
+        mock_healer.rules = [
+            MagicMock(to_dict=lambda: {"id": "r1", "name": "Test", "incident_type": "timeout", "pattern": ".*", "action": "retry", "priority": 10, "cooldown_seconds": 60, "enabled": True}),
+        ]
+        mock_get.return_value = mock_healer
+        result = json.loads(ahy_list_recovery_rules())
+        assert len(result) == 1
+        assert result[0]["id"] == "r1"
+
+    @patch("ahy_governance.self_healer.get_healer")
+    def test_ahy_recovery_history(self, mock_get):
+        mock_healer = MagicMock()
+        mock_healer.ledger._db = None
+        mock_healer.ledger.query.return_value = [
+            {"id": 1, "agent_name": "Planner", "incident_type": "timeout", "recovery_action": "retry", "success": 1},
+        ]
+        mock_get.return_value = mock_healer
+        result = json.loads(ahy_recovery_history(agent_name="Planner"))
+        assert len(result) == 1
+        assert result[0]["agent_name"] == "Planner"
+
+    @patch("ahy_governance.self_healer.get_healer")
+    def test_ahy_self_heal_with_context(self, mock_get):
+        mock_healer = MagicMock()
+        mock_result = MagicMock()
+        mock_result.to_dict.return_value = {"agent_name": "B", "status": "attempted", "diagnosed_by": "rule", "incident_type": "timeout", "action": None, "detail": ""}
+        mock_healer.self_heal.return_value = mock_result
+        mock_get.return_value = mock_healer
+        result = json.loads(ahy_self_heal("B", "timeout", "err", context_json='{"retry": 3}'))
+        assert result["agent_name"] == "B"
+
 
 class TestSmoke:
     def test_mcp_server_object_exists(self):
