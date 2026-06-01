@@ -236,6 +236,22 @@ def ahy_recovery_history(
     return json.dumps(entries, ensure_ascii=False, indent=2, default=str)
 
 
+@mcp.tool()
+def ahy_scan_and_learn(workspace_id: str = "") -> str:
+    """Scan recovery ledger and learn new rules from successful LLM diagnoses."""
+    db = _ensure_db()
+    from .self_healer import get_healer
+    from .recovery_learner import get_learner
+    healer = get_healer()
+    learner = get_learner()
+    if healer.ledger._db is None:
+        healer.set_database(db)
+    learner.set_database(db)
+    learner.set_rule_engine(healer._rule_engine)
+    result = learner.scan_and_learn(workspace_id)
+    return _to_json(result)
+
+
 # ── Memory Tools ──────────────────────────────────────────────
 
 @mcp.tool()

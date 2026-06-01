@@ -116,6 +116,7 @@ from .self_healer import (
 )
 from .recovery_rules import default_recovery_rules
 from .llm_diagnose import make_deepseek_diagnose_fn
+from .recovery_learner import RecoveryLearner, LearnResult, get_learner, scan_and_learn
 
 # ── Cost Advisor ────────────────────────────────────────────────
 from .cost_advisor import (
@@ -279,6 +280,10 @@ __all__ = [
     "self_heal",
     "default_recovery_rules",
     "make_deepseek_diagnose_fn",
+    "RecoveryLearner",
+    "LearnResult",
+    "get_learner",
+    "scan_and_learn",
     # SDK Decorator
     "track",
     # Cost Advisor
