@@ -99,9 +99,17 @@ def ahy_check_conflicts(
     dag_json: str = "",
 ) -> str:
     """Detect conflicts between agent outputs. Pass step_outputs as JSON string."""
+    from types import SimpleNamespace
     from .conflict_detector import check_conflicts
-    step_outputs = json.loads(step_outputs_json)
+    raw = json.loads(step_outputs_json)
     dag = json.loads(dag_json) if dag_json else None
+    # Wrap plain values in SimpleNamespace so check_conflicts can access .output
+    step_outputs = {}
+    for k, v in raw.items():
+        if isinstance(v, dict) and "output" in v:
+            step_outputs[k] = SimpleNamespace(**v)
+        else:
+            step_outputs[k] = SimpleNamespace(output=v)
     conflicts = check_conflicts(step_outputs, dag)
     return _to_json(conflicts)
 
@@ -149,7 +157,7 @@ def ahy_log_audit(
     details: str = "",
     session_id: str = "",
 ) -> str:
-    """Log an audit event. event_type: one of AGENT_START, AGENT_END, LLM_CALL, etc."""
+    """Log an audit event. event_type: one of agent_start, agent_complete, agent_error, agent_retry, pipeline_start, pipeline_complete, pipeline_blocked, conflict_detected, conflict_resolved, budget_warning, budget_exceeded, human_review, human_override, tool_call, config_change, model_change, permission_denied."""
     from .audit_logger import log_audit, AuditEventType
     et = AuditEventType(event_type)
     det = json.loads(details) if details else None

@@ -88,19 +88,23 @@ class TestToJson:
 # ── Core Tools ────────────────────────────────────────────────
 
 class TestTrackCost:
-    @patch("ahy_governance.cost_tracker.track_cost")
-    def test_basic(self, mock_track):
-        mock_entry = FakeObj(agent_name="Planner", cost_usd=0.05)
-        mock_track.return_value = mock_entry
+    @patch("ahy_governance.cost_tracker.get_tracker")
+    def test_basic(self, mock_get):
+        mock_tracker = MagicMock()
+        mock_entry = FakeDataclass(agent_name="Planner", model="gpt-4o", tokens_in=1000, tokens_out=500, cost_usd=0.05, session_id="", timestamp="2026-01-01T00:00:00Z", warning=None)
+        mock_tracker.track.return_value = mock_entry
+        mock_get.return_value = mock_tracker
         result = json.loads(ahy_track_cost("Planner", "gpt-4o", 1000, 500))
         assert result["agent_name"] == "Planner"
-        mock_track.assert_called_once_with("Planner", "gpt-4o", 1000, 500, "")
+        mock_tracker.track.assert_called_once_with("Planner", "gpt-4o", 1000, 500, "")
 
-    @patch("ahy_governance.cost_tracker.track_cost")
-    def test_with_session(self, mock_track):
-        mock_track.return_value = FakeObj(cost_usd=0.01)
+    @patch("ahy_governance.cost_tracker.get_tracker")
+    def test_with_session(self, mock_get):
+        mock_tracker = MagicMock()
+        mock_tracker.track.return_value = FakeDataclass(agent_name="E", model="haiku", tokens_in=100, tokens_out=50, cost_usd=0.01, session_id="s1", timestamp="2026-01-01T00:00:00Z", warning=None)
+        mock_get.return_value = mock_tracker
         ahy_track_cost("E", "haiku", 100, 50, session_id="s1")
-        mock_track.assert_called_once_with("E", "haiku", 100, 50, "s1")
+        mock_tracker.track.assert_called_once_with("E", "haiku", 100, 50, "s1")
 
 
 class TestCheckHealth:

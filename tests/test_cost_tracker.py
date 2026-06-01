@@ -97,9 +97,11 @@ class TestTracking:
         assert entry.tokens_out == 500
         assert entry.cost_usd > 0
 
-    def test_track_unknown_model_raises(self, tracker):
-        with pytest.raises(KeyError, match="Unknown model"):
-            tracker.track("X", "fake-model-999", 100, 100)
+    def test_track_unknown_model_defaults(self, tracker):
+        entry = tracker.track("X", "fake-model-999", 100, 100)
+        assert entry.cost_usd > 0
+        assert entry.warning is not None
+        assert "fake-model-999" in entry.warning
 
     def test_entry_count(self, populated_tracker):
         assert populated_tracker.entry_count == 4
