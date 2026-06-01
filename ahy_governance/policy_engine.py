@@ -41,6 +41,337 @@ class TriggerType(Enum):
     PROMPT_INJECTION = "prompt_injection"
     COMPLIANCE_VIOLATION = "compliance_violation"
     AGENT_ERROR = "agent_error"
+    AGENT_LEVEL_EVALUATED = "agent_level_evaluated"
+
+
+# ── Agent Level Grading ──────────────────────────────────────────
+# Based on agents-best-practices (github.com/DenisSergeevitch/agents-best-practices)
+# Maps agent maturity to required governance controls.
+
+
+class AgentLevel(Enum):
+    """Agent maturity levels — from read-only to fully autonomous."""
+    LEVEL_0 = 0  # Answer-only, no tools
+    LEVEL_1 = 1  # Retrieval (read-only)
+    LEVEL_2 = 2  # Drafting (propose, can't commit)
+    LEVEL_3 = 3  # Approval-gated actor
+    LEVEL_4 = 4  # Policy-bounded autonomous
+    LEVEL_5 = 5  # Long-running goal worker
+
+
+class RiskClass(Enum):
+    """Tool risk classification — from agents-best-practices."""
+    READ_ONLY = "read_only"
+    SEARCH_ONLY = "search_only"
+    COMPUTE_ONLY = "compute_only"
+    DRAFT_ONLY = "draft_only"
+    WRITE_LOCAL = "write_local"
+    WRITE_INTERNAL = "write_internal"
+    WRITE_EXTERNAL = "write_external"
+    FINANCIAL = "financial"
+    COMMUNICATION = "communication"
+    IDENTITY_ACCESS = "identity_access"
+    SECURITY_SENSITIVE = "security_sensitive"
+    PROCESS_EXECUTION = "process_execution"
+    NETWORK_OPEN_WORLD = "network_open_world"
+    DESTRUCTIVE = "destructive"
+    PRIVILEGED_ADMIN = "privileged_admin"
+
+
+@dataclass
+class AgentCapabilities:
+    """Describes what an agent can do — used to evaluate its level."""
+    can_read: bool = False
+    can_search: bool = False
+    can_draft: bool = False
+    can_write_local: bool = False
+    can_write_external: bool = False
+    can_execute_code: bool = False
+    can_use_financial_tools: bool = False
+    can_communicate_externally: bool = False
+    requires_approval: bool = True  # Does agent need approval for writes?
+    has_budget_controls: bool = False
+    has_durable_state: bool = False
+    has_checkpoint_recovery: bool = False
+    max_tool_risk: RiskClass = RiskClass.READ_ONLY
+
+    def to_dict(self) -> dict:
+        return {
+            "can_read": self.can_read,
+            "can_search": self.can_search,
+            "can_draft": self.can_draft,
+            "can_write_local": self.can_write_local,
+            "can_write_external": self.can_write_external,
+            "can_execute_code": self.can_execute_code,
+            "can_use_financial_tools": self.can_use_financial_tools,
+            "can_communicate_externally": self.can_communicate_externally,
+            "requires_approval": self.requires_approval,
+            "has_budget_controls": self.has_budget_controls,
+            "has_durable_state": self.has_durable_state,
+            "has_checkpoint_recovery": self.has_checkpoint_recovery,
+            "max_tool_risk": self.max_tool_risk.value,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> AgentCapabilities:
+        risk = d.get("max_tool_risk", "read_only")
+        if isinstance(risk, str):
+            try:
+                risk = RiskClass(risk)
+            except ValueError:
+                risk = RiskClass.READ_ONLY
+        return cls(
+            can_read=d.get("can_read", False),
+            can_search=d.get("can_search", False),
+            can_draft=d.get("can_draft", False),
+            can_write_local=d.get("can_write_local", False),
+            can_write_external=d.get("can_write_external", False),
+            can_execute_code=d.get("can_execute_code", False),
+            can_use_financial_tools=d.get("can_use_financial_tools", False),
+            can_communicate_externally=d.get("can_communicate_externally", False),
+            requires_approval=d.get("requires_approval", True),
+            has_budget_controls=d.get("has_budget_controls", False),
+            has_durable_state=d.get("has_durable_state", False),
+            has_checkpoint_recovery=d.get("has_checkpoint_recovery", False),
+            max_tool_risk=risk,
+        )
+
+
+@dataclass
+class GovernanceStrategy:
+    """Governance controls required for a given agent level."""
+    level: AgentLevel
+    label: str
+    description: str
+    required_controls: list[str]
+    risk_classes_allowed: list[RiskClass]
+    needs_audit: bool = True
+    needs_cost_tracking: bool = True
+    needs_conflict_detection: bool = False
+    needs_anomaly_detection: bool = False
+    needs_auto_resolution: bool = False
+    needs_prompt_guard: bool = False
+    needs_rbac: bool = False
+    needs_circuit_breaker: bool = False
+    needs_realtime_alerts: bool = False
+    needs_human_fallback: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "level": self.level.value,
+            "label": self.label,
+            "description": self.description,
+            "required_controls": self.required_controls,
+            "risk_classes_allowed": [r.value for r in self.risk_classes_allowed],
+            "needs_audit": self.needs_audit,
+            "needs_cost_tracking": self.needs_cost_tracking,
+            "needs_conflict_detection": self.needs_conflict_detection,
+            "needs_anomaly_detection": self.needs_anomaly_detection,
+            "needs_auto_resolution": self.needs_auto_resolution,
+            "needs_prompt_guard": self.needs_prompt_guard,
+            "needs_rbac": self.needs_rbac,
+            "needs_circuit_breaker": self.needs_circuit_breaker,
+            "needs_realtime_alerts": self.needs_realtime_alerts,
+            "needs_human_fallback": self.needs_human_fallback,
+        }
+
+
+# ── Level → Strategy mapping ─────────────────────────────────────
+
+AGENT_LEVEL_STRATEGIES: dict[AgentLevel, GovernanceStrategy] = {
+    AgentLevel.LEVEL_0: GovernanceStrategy(
+        level=AgentLevel.LEVEL_0,
+        label="Answer-Only",
+        description="No tool execution — pure Q&A, drafting, summarization.",
+        required_controls=["audit_log"],
+        risk_classes_allowed=[RiskClass.READ_ONLY],
+    ),
+    AgentLevel.LEVEL_1: GovernanceStrategy(
+        level=AgentLevel.LEVEL_1,
+        label="Retrieval Agent",
+        description="Read-only access to trusted resources, no side effects.",
+        required_controls=["audit_log", "cost_tracking", "read_only_permissions"],
+        risk_classes_allowed=[RiskClass.READ_ONLY, RiskClass.SEARCH_ONLY],
+        needs_cost_tracking=True,
+    ),
+    AgentLevel.LEVEL_2: GovernanceStrategy(
+        level=AgentLevel.LEVEL_2,
+        label="Drafting Agent",
+        description="Can propose actions and draft outputs, but cannot commit changes.",
+        required_controls=["audit_log", "cost_tracking", "draft_gate", "prompt_guard"],
+        risk_classes_allowed=[
+            RiskClass.READ_ONLY, RiskClass.SEARCH_ONLY,
+            RiskClass.COMPUTE_ONLY, RiskClass.DRAFT_ONLY,
+        ],
+        needs_prompt_guard=True,
+    ),
+    AgentLevel.LEVEL_3: GovernanceStrategy(
+        level=AgentLevel.LEVEL_3,
+        label="Approval-Gated Actor",
+        description="Can execute actions after explicit approval. Conflict detection active.",
+        required_controls=[
+            "audit_log", "cost_tracking", "approval_gate",
+            "conflict_detection", "prompt_guard", "rbac",
+        ],
+        risk_classes_allowed=[
+            RiskClass.READ_ONLY, RiskClass.SEARCH_ONLY,
+            RiskClass.COMPUTE_ONLY, RiskClass.DRAFT_ONLY,
+            RiskClass.WRITE_LOCAL, RiskClass.WRITE_INTERNAL,
+        ],
+        needs_conflict_detection=True,
+        needs_prompt_guard=True,
+        needs_rbac=True,
+        needs_human_fallback=True,
+    ),
+    AgentLevel.LEVEL_4: GovernanceStrategy(
+        level=AgentLevel.LEVEL_4,
+        label="Autonomous Actor",
+        description="Executes low-risk actions autonomously within strict policy bounds.",
+        required_controls=[
+            "audit_log", "cost_tracking", "conflict_detection",
+            "anomaly_detection", "auto_resolution", "prompt_guard",
+            "rbac", "circuit_breaker",
+        ],
+        risk_classes_allowed=[
+            RiskClass.READ_ONLY, RiskClass.SEARCH_ONLY,
+            RiskClass.COMPUTE_ONLY, RiskClass.DRAFT_ONLY,
+            RiskClass.WRITE_LOCAL, RiskClass.WRITE_INTERNAL,
+            RiskClass.WRITE_EXTERNAL,
+        ],
+        needs_conflict_detection=True,
+        needs_anomaly_detection=True,
+        needs_auto_resolution=True,
+        needs_prompt_guard=True,
+        needs_rbac=True,
+        needs_circuit_breaker=True,
+        needs_human_fallback=True,
+    ),
+    AgentLevel.LEVEL_5: GovernanceStrategy(
+        level=AgentLevel.LEVEL_5,
+        label="Full Autonomous",
+        description="Long-running goal worker with full harness — all controls active.",
+        required_controls=[
+            "audit_log", "cost_tracking", "conflict_detection",
+            "anomaly_detection", "auto_resolution", "prompt_guard",
+            "rbac", "circuit_breaker", "realtime_alerts",
+            "checkpoint_recovery", "budget_enforcement",
+        ],
+        risk_classes_allowed=[r for r in RiskClass],  # all risk classes
+        needs_conflict_detection=True,
+        needs_anomaly_detection=True,
+        needs_auto_resolution=True,
+        needs_prompt_guard=True,
+        needs_rbac=True,
+        needs_circuit_breaker=True,
+        needs_realtime_alerts=True,
+        needs_human_fallback=True,
+    ),
+}
+
+
+def evaluate_agent_level(capabilities: AgentCapabilities) -> AgentLevel:
+    """Determine agent level from its capabilities.
+
+    Uses a scoring approach: each capability maps to a minimum level.
+    The agent's level is the highest level where it meets ALL requirements.
+    """
+    # Level 0: default — no capabilities needed
+    # Level 1: can_read or can_search
+    # Level 2: can_draft + (can_read or can_search)
+    # Level 3: can_write_local + requires_approval
+    # Level 4: can_write_external + !requires_approval + has_budget_controls
+    # Level 5: has_durable_state + has_checkpoint_recovery + can_execute_code
+
+    if (capabilities.has_durable_state
+            and capabilities.has_checkpoint_recovery
+            and capabilities.can_execute_code
+            and not capabilities.requires_approval
+            and capabilities.has_budget_controls):
+        return AgentLevel.LEVEL_5
+
+    if (capabilities.can_write_external
+            and not capabilities.requires_approval
+            and capabilities.has_budget_controls):
+        return AgentLevel.LEVEL_4
+
+    if (capabilities.can_write_local
+            and capabilities.requires_approval):
+        return AgentLevel.LEVEL_3
+
+    if capabilities.can_draft and (capabilities.can_read or capabilities.can_search):
+        return AgentLevel.LEVEL_2
+
+    if capabilities.can_read or capabilities.can_search:
+        return AgentLevel.LEVEL_1
+
+    return AgentLevel.LEVEL_0
+
+
+def recommend_strategy(level: AgentLevel) -> GovernanceStrategy:
+    """Get the recommended governance strategy for an agent level."""
+    return AGENT_LEVEL_STRATEGIES[level]
+
+
+def level_policy_rules() -> list[PolicyRule]:
+    """Generate default policy rules based on agent levels."""
+    return [
+        PolicyRule(
+            id="level-3-plus-conflict-detection",
+            name="Level 3+ Conflict Detection",
+            description="Agents at Level 3+ must have conflict detection enabled",
+            trigger=TriggerType.AGENT_LEVEL_EVALUATED,
+            match_conditions=[
+                MatchCondition(field="agent_level", operator="gte", value=3),
+                MatchCondition(field="has_conflict_detection", operator="eq", value=False),
+            ],
+            actions=[ActionType.ALERT, ActionType.LOG],
+        ),
+        PolicyRule(
+            id="level-4-plus-anomaly-detection",
+            name="Level 4+ Anomaly Detection",
+            description="Agents at Level 4+ must have anomaly detection enabled",
+            trigger=TriggerType.AGENT_LEVEL_EVALUATED,
+            match_conditions=[
+                MatchCondition(field="agent_level", operator="gte", value=4),
+                MatchCondition(field="has_anomaly_detection", operator="eq", value=False),
+            ],
+            actions=[ActionType.ALERT, ActionType.LOG],
+        ),
+        PolicyRule(
+            id="level-5-circuit-breaker",
+            name="Level 5 Circuit Breaker Required",
+            description="Level 5 agents must have circuit breaker enabled",
+            trigger=TriggerType.AGENT_LEVEL_EVALUATED,
+            match_conditions=[
+                MatchCondition(field="agent_level", operator="eq", value=5),
+                MatchCondition(field="has_circuit_breaker", operator="eq", value=False),
+            ],
+            actions=[ActionType.BLOCK, ActionType.ALERT],
+        ),
+        PolicyRule(
+            id="unapproved-external-write",
+            name="Unapproved External Write Block",
+            description="Agents without approval gate cannot perform external writes",
+            trigger=TriggerType.AGENT_LEVEL_EVALUATED,
+            match_conditions=[
+                MatchCondition(field="can_write_external", operator="eq", value=True),
+                MatchCondition(field="requires_approval", operator="eq", value=False),
+                MatchCondition(field="agent_level", operator="lt", value=4),
+            ],
+            actions=[ActionType.BLOCK, ActionType.ALERT],
+        ),
+        PolicyRule(
+            id="no-budget-autonomous-block",
+            name="No Budget Autonomous Block",
+            description="Autonomous agents (Level 4+) without budget controls are blocked",
+            trigger=TriggerType.AGENT_LEVEL_EVALUATED,
+            match_conditions=[
+                MatchCondition(field="agent_level", operator="gte", value=4),
+                MatchCondition(field="has_budget_controls", operator="eq", value=False),
+            ],
+            actions=[ActionType.BLOCK, ActionType.ALERT],
+        ),
+    ]
 
 
 class ActionType(Enum):
@@ -247,6 +578,7 @@ def default_rules() -> list[PolicyRule]:
             ],
             actions=[ActionType.BLOCK, ActionType.ALERT, ActionType.LOG],
         ),
+        *level_policy_rules(),
     ]
 
 

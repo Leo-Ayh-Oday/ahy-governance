@@ -48,10 +48,12 @@ redis = ["redis>=5.0"]
 observability = ["structlog>=24.0"]
 security = ["bcrypt>=4.0", "PyJWT>=2.0"]
 crewai = ["crewai>=0.30"]
+mcp = ["fastmcp>=3.0"]
 prod = ["ahy-governance[postgres,redis,observability,web,security]"]
 
 [project.scripts]
 ahy-dashboard = "web.server:main"
+ahy-governance-mcp = "ahy_governance.mcp_server:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

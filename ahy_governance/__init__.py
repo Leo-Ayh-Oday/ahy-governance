@@ -133,10 +133,27 @@ except ImportError:
     get_alerter = None
 
 try:
-    from .policy_engine import PolicyEngine, get_engine
+    from .policy_engine import (
+        PolicyEngine,
+        get_policy_engine,
+        AgentLevel,
+        RiskClass,
+        AgentCapabilities,
+        GovernanceStrategy,
+        evaluate_agent_level,
+        recommend_strategy,
+        AGENT_LEVEL_STRATEGIES,
+    )
 except ImportError:
     PolicyEngine = None
-    get_engine = None
+    get_policy_engine = None
+    AgentLevel = None
+    RiskClass = None
+    AgentCapabilities = None
+    GovernanceStrategy = None
+    evaluate_agent_level = None
+    recommend_strategy = None
+    AGENT_LEVEL_STRATEGIES = None
 
 __version__ = "0.9.0"
 __all__ = [
@@ -238,6 +255,14 @@ __all__ = [
     "ComplianceReporter",
     "get_reporter",
     "get_alerter",
+    # Policy Engine + Agent Level Grading
     "PolicyEngine",
-    "get_engine",
+    "get_policy_engine",
+    "AgentLevel",
+    "RiskClass",
+    "AgentCapabilities",
+    "GovernanceStrategy",
+    "evaluate_agent_level",
+    "recommend_strategy",
+    "AGENT_LEVEL_STRATEGIES",
 ]
