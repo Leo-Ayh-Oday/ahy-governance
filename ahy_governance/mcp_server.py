@@ -74,8 +74,12 @@ def ahy_track_cost(
     session_id: str = "",
 ) -> str:
     """Track token cost for an agent call. Returns cost summary."""
-    from .cost_tracker import track_cost
-    entry = track_cost(agent_name, model, tokens_in, tokens_out, session_id)
+    from .cost_tracker import get_tracker
+    db = _ensure_db()
+    tracker = get_tracker()
+    if tracker._db is None:
+        tracker.set_database(db)
+    entry = tracker.track(agent_name, model, tokens_in, tokens_out, session_id)
     return _to_json(entry)
 
 

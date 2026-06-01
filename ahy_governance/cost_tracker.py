@@ -89,6 +89,7 @@ class CostEntry:
     cost_usd: float
     session_id: str = ""
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    warning: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -184,15 +185,17 @@ class CostTracker:
         tokens_out: int, session_id: str = "", workspace_id: str = "",
     ) -> CostEntry:
         pricing = self.get_pricing(model)
+        warning = None
         if pricing is None:
-            raise KeyError(
-                f"Unknown model '{model}'. Use register_pricing() to add custom pricing."
-            )
+            # Unknown model: use conservative default pricing
+            pricing = ModelPricing(model, "unknown", 10.00, 30.00)
+            warning = f"Unknown model '{model}', using default pricing ($10/$30 per 1M tokens)"
         cost = pricing.calculate(tokens_in, tokens_out)
         entry = CostEntry(
             agent_name=agent_name, model=model,
             tokens_in=tokens_in, tokens_out=tokens_out,
             cost_usd=cost, session_id=session_id,
+            warning=warning,
         )
         self._entries.append(entry)
 
