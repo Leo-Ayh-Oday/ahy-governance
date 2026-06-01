@@ -92,7 +92,7 @@ class CostEntry:
     warning: str | None = None
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "agent": self.agent_name,
             "model": self.model,
             "tokens_in": self.tokens_in,
@@ -102,6 +102,9 @@ class CostEntry:
             "session_id": self.session_id,
             "timestamp": self.timestamp,
         }
+        if self.warning:
+            d["warning"] = self.warning
+        return d
 
 
 @dataclass
