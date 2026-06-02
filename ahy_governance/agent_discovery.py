@@ -112,9 +112,16 @@ def _scan_agp_files() -> list[DiscoveredAgent]:
         # Check if running on declared port
         if m.upstream_url:
             port = _extract_port(m.upstream_url)
-            if port and _port_in_use(port):
-                agent.status = "running"
-                agent.port = port
+            agent.port = port
+            probe = _probe_declared_agent(m.upstream_url)
+            if probe:
+                agent.status = "verified" if probe.get("verified") else "running"
+                if probe.get("model") and probe["model"] != "unknown":
+                    agent.model = probe["model"]
+                agent.governance = {
+                    **agent.governance,
+                    "runtime_probe": probe,
+                }
         results.append(agent)
     return results
 
@@ -193,6 +200,53 @@ def _probe_agent_endpoint(port: int) -> dict | None:
                     return {"framework": fw, "model": "detected"}
                 if path == "/api/agent/list" and resp.status == 200:
                     return {"framework": fw, "model": "governance"}
+        except Exception:
+            continue
+    return None
+
+
+def _probe_declared_agent(upstream_url: str) -> dict | None:
+    port = _extract_port(upstream_url)
+    if not port or not _port_in_use(port):
+        return None
+    probe = _probe_url(upstream_url)
+    if probe:
+        return {"port": port, "verified": True, **probe}
+    return {"port": port, "verified": False, "model": "unknown"}
+
+
+def _probe_url(upstream_url: str) -> dict | None:
+    import urllib.request
+    upstream = upstream_url.rstrip("/")
+    probes = [
+        ("/health", "health"),
+        ("/api/health", "api_health"),
+        ("/v1/models", "openai_models"),
+        ("/", "root"),
+    ]
+    for path, kind in probes:
+        try:
+            req = urllib.request.Request(
+                f"{upstream}{path}",
+                headers={"Accept": "application/json,text/plain,*/*"},
+            )
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                body = resp.read().decode("utf-8", errors="replace")[:1000]
+                model = "unknown"
+                if kind == "openai_models":
+                    try:
+                        data = json.loads(body)
+                        models = data.get("data", [])
+                        if models:
+                            model = models[0].get("id", "unknown")
+                    except Exception:
+                        model = "openai-compatible"
+                return {
+                    "probe_path": path,
+                    "probe_kind": kind,
+                    "http_status": resp.status,
+                    "model": model,
+                }
         except Exception:
             continue
     return None
