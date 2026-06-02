@@ -32,6 +32,28 @@ def agp_manifest(**overrides):
 
 
 class TestAgentDiscoverRegister:
+    def test_import_candidates_endpoint_is_read_only(self, monkeypatch):
+        from ahy_governance.agent_import_scanner import ImportCandidate
+        import ahy_governance.agent_import_scanner as scanner
+
+        monkeypatch.setattr(scanner, "scan_import_candidates", lambda roots=None: [
+            ImportCandidate(
+                candidate_id="ic_test",
+                name="Codex CLI",
+                kind="codex_config",
+                source_path="C:/Users/example/.codex/config.toml",
+                confidence="high",
+                evidence=["found config.toml"],
+            )
+        ])
+
+        response = client.get("/api/agent/import-candidates")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 1
+        assert data["candidates"][0]["registerable"] is False
+
     def test_requires_explicit_selection(self):
         response = client.post("/api/agent/discover/register", json={})
 

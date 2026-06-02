@@ -2015,6 +2015,18 @@ async def agent_discover_stream(request: Request):
     )
 
 
+@app.get("/api/agent/import-candidates")
+async def agent_import_candidates(roots: str = ""):
+    """List non-AGP import candidates. Read-only; never registers agents."""
+    from ahy_governance.agent_import_scanner import scan_import_candidates
+    root_list = [r.strip() for r in roots.split(";") if r.strip()] if roots else None
+    candidates = scan_import_candidates(root_list)
+    return {
+        "total": len(candidates),
+        "candidates": [c.to_dict() for c in candidates],
+    }
+
+
 @app.post("/api/agent/discover/register")
 async def agent_discover_register(request: Request):
     """Register discovered agents by agent_id. Uses AGP standard."""
