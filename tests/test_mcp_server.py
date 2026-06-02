@@ -10,6 +10,8 @@ from ahy_governance.mcp_server import (
     _to_json,
     _admin_enabled,
     _admin_guard,
+    _clamp_limit,
+    _full_auto_enabled,
     ahy_track_cost,
     ahy_check_health,
     ahy_check_conflicts,
@@ -449,11 +451,38 @@ class TestSelfHealTools:
         mock_result.to_dict.return_value = {"agent_name": "A", "status": "attempted", "diagnosed_by": "rule", "incident_type": "timeout", "action": None, "detail": ""}
         mock_healer.self_heal.return_value = mock_result
         mock_get.return_value = mock_healer
-        ahy_self_heal("A", "timeout", "err", self_heal_level="full_auto")
+        ahy_self_heal("A", "timeout", "err", self_heal_level="llm_assisted")
         # Verify level_override passed without mutating singleton
         mock_healer.self_heal.assert_called_once()
         call_kwargs = mock_healer.self_heal.call_args[1]
+        assert call_kwargs["level_override"] == SelfHealLevel.LLM_ASSISTED
+
+    @patch("ahy_governance.self_healer.get_healer")
+    def test_ahy_self_heal_full_auto_disabled_by_default(self, mock_get, monkeypatch):
+        monkeypatch.delenv("AHY_MCP_FULL_AUTO", raising=False)
+        result = json.loads(
+            ahy_self_heal("A", "timeout", "err", self_heal_level="full_auto")
+        )
+        assert "full_auto self-healing is disabled" in result["error"]
+        mock_get.assert_not_called()
+
+    @patch("ahy_governance.self_healer.get_healer")
+    def test_ahy_self_heal_full_auto_env_gate(self, mock_get, monkeypatch):
+        from ahy_governance.self_healer import SelfHealLevel
+        monkeypatch.setenv("AHY_MCP_FULL_AUTO", "1")
+        mock_healer = MagicMock()
+        mock_result = MagicMock()
+        mock_result.to_dict.return_value = {"agent_name": "A", "status": "attempted", "diagnosed_by": "llm", "incident_type": "timeout", "action": None, "detail": ""}
+        mock_healer.self_heal.return_value = mock_result
+        mock_get.return_value = mock_healer
+        ahy_self_heal(
+            "A", "timeout", "err",
+            self_heal_level="full_auto",
+            workspace_id="ws-1",
+        )
+        call_kwargs = mock_healer.self_heal.call_args[1]
         assert call_kwargs["level_override"] == SelfHealLevel.FULL_AUTO
+        assert call_kwargs["workspace_id"] == "ws-1"
 
     @patch("ahy_governance.self_healer.get_healer")
     def test_ahy_list_recovery_rules(self, mock_get):
@@ -474,9 +503,10 @@ class TestSelfHealTools:
             {"id": 1, "agent_name": "Planner", "incident_type": "timeout", "recovery_action": "retry", "success": 1},
         ]
         mock_get.return_value = mock_healer
-        result = json.loads(ahy_recovery_history(agent_name="Planner"))
+        result = json.loads(ahy_recovery_history(agent_name="Planner", limit=999999))
         assert len(result) == 1
         assert result[0]["agent_name"] == "Planner"
+        assert mock_healer.ledger.query.call_args[1]["limit"] == 500
 
     @patch("ahy_governance.self_healer.get_healer")
     def test_ahy_self_heal_with_context(self, mock_get):
@@ -487,6 +517,18 @@ class TestSelfHealTools:
         mock_get.return_value = mock_healer
         result = json.loads(ahy_self_heal("B", "timeout", "err", context_json='{"retry": 3}'))
         assert result["agent_name"] == "B"
+
+    def test_clamp_limit(self):
+        assert _clamp_limit(0) == 1
+        assert _clamp_limit(42) == 42
+        assert _clamp_limit(999999) == 500
+        assert _clamp_limit("bad") == 100
+
+    def test_full_auto_env_flag(self, monkeypatch):
+        monkeypatch.delenv("AHY_MCP_FULL_AUTO", raising=False)
+        assert _full_auto_enabled() is False
+        monkeypatch.setenv("AHY_MCP_FULL_AUTO", "1")
+        assert _full_auto_enabled() is True
 
 
 class TestSmoke:

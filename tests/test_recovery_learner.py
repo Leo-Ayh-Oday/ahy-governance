@@ -94,8 +94,24 @@ class TestRecoveryLearner:
         rule = result.new_rules[0]
         assert rule.incident_type == IncidentType.MEMORY_EXHAUSTED
         assert rule.recovery_action_type == RecoveryActionType.RESTART_AGENT
+        assert db._rules[rule.id]["enabled"] is False
         assert "[学习]" in rule.name
         assert "×4" in rule.name
+
+    def test_auto_enable_learned_rules_is_explicit(self):
+        db = FakeDB()
+        for i in range(3):
+            db._entries.append(
+                _make_entry("rate_limit", f"429 rate limit {i}", "circuit_break"),
+            )
+        engine = RuleEngine()
+        learner = RecoveryLearner(min_occurrences=3, auto_enable_learned_rules=True)
+        learner.set_database(db)
+        learner.set_rule_engine(engine)
+        result = learner.scan_and_learn()
+        rule = result.new_rules[0]
+        assert db._rules[rule.id]["enabled"] is True
+        assert any(r.id == rule.id for r in engine.rules)
 
     def test_existing_rule_skipped(self):
         db = FakeDB()

@@ -236,7 +236,10 @@ class TestPipelineError:
         with (
             patch("ahy_governance.health_monitor.get_monitor") as mock_mon,
             patch("ahy_governance.audit_logger.get_auditor") as mock_aud,
+            patch("ahy_governance.self_healer.get_healer") as mock_healer,
+            patch("ahy_governance.checkpoint_store.get_checkpoint_store") as mock_cp,
         ):
+            mock_cp.return_value.load_latest.return_value = None
             p.on_error(event)
 
         mock_mon.return_value.heartbeat.assert_called_once_with(
@@ -245,6 +248,7 @@ class TestPipelineError:
         mock_aud.return_value.log.assert_called_once()
         call_args = mock_aud.return_value.log.call_args
         assert call_args[0][0] == AuditEventType.AGENT_ERROR
+        mock_healer.return_value.self_heal.assert_called_once()
 
 
 class TestPipelineOptionalHooks:

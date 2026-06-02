@@ -248,6 +248,17 @@ class Database:
             cooldown_seconds INTEGER NOT NULL DEFAULT 300,
             enabled INTEGER NOT NULL DEFAULT 1
         );
+
+        CREATE TABLE IF NOT EXISTS agent_checkpoints (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_id TEXT NOT NULL DEFAULT '',
+            agent_name TEXT NOT NULL,
+            session_id TEXT NOT NULL DEFAULT '',
+            state_json TEXT NOT NULL,
+            step TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_cp_agent_sess ON agent_checkpoints(agent_name, session_id, workspace_id);
         """)
         self._conn.commit()
 
@@ -632,6 +643,59 @@ class Database:
              1 if enabled else 0),
         )
 
+    # ── Checkpoints ─────────────────────────────────────────
+
+    def checkpoint_insert(self, agent_name: str, session_id: str,
+                          state_json: str, step: str, created_at: str,
+                          workspace_id: str = "") -> int:
+        cur = self._execute(
+            "INSERT INTO agent_checkpoints (workspace_id, agent_name, session_id, "
+            "state_json, step, created_at) VALUES (?,?,?,?,?,?)",
+            (self._w(workspace_id), agent_name, session_id, state_json, step, created_at),
+        )
+        return cur.lastrowid
+
+    def checkpoint_latest(self, agent_name: str, session_id: str = "",
+                          workspace_id: str = "") -> dict | None:
+        if session_id:
+            return self._fetchone(
+                "SELECT * FROM agent_checkpoints WHERE agent_name=? AND session_id=? "
+                "AND workspace_id=? ORDER BY created_at DESC LIMIT 1",
+                (agent_name, session_id, self._w(workspace_id)),
+            )
+        return self._fetchone(
+            "SELECT * FROM agent_checkpoints WHERE agent_name=? AND workspace_id=? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (agent_name, self._w(workspace_id)),
+        )
+
+    def checkpoint_list(self, agent_name: str = "", session_id: str = "",
+                        workspace_id: str = "", limit: int = 50) -> list[dict]:
+        conditions = ["workspace_id=?"]
+        params: list = [self._w(workspace_id)]
+        if agent_name:
+            conditions.append("agent_name=?")
+            params.append(agent_name)
+        if session_id:
+            conditions.append("session_id=?")
+            params.append(session_id)
+        where = " AND ".join(conditions)
+        return self._fetchall(
+            f"SELECT * FROM agent_checkpoints WHERE {where} ORDER BY created_at DESC LIMIT ?",
+            tuple(params + [limit]),
+        )
+
+    def checkpoint_prune(self, max_age_days: int, workspace_id: str = "") -> int:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM agent_checkpoints WHERE workspace_id=? AND created_at < ?",
+                (self._w(workspace_id), cutoff),
+            )
+            self._conn.commit()
+            return cur.rowcount
+
     # ── Lifecycle ───────────────────────────────────────────
 
     def clear_all(self) -> None:
@@ -643,6 +707,7 @@ class Database:
             "memory_entries", "registered_agents",
             "anomalies", "cost_recommendations",
             "recovery_ledger", "recovery_rules",
+            "agent_checkpoints",
         ]
         for t in tables:
             self._execute(f"DELETE FROM {t}")

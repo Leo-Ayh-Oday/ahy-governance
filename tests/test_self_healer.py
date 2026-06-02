@@ -362,6 +362,37 @@ class TestSelfHealerFullAuto:
         assert result.status == RecoveryStatus.ATTEMPTED
         assert result.diagnosed_by == "llm"
 
+    def test_high_risk_llm_action_escalates(self):
+        healer = SelfHealer(level=SelfHealLevel.FULL_AUTO)
+        healer.load_rules([])
+        doctor = LLMDoctor()
+        doctor.set_diagnose_fn(lambda err, ctx: RecoveryAction(
+            action_type=RecoveryActionType.RESTART_AGENT,
+            description="Restart now",
+            source="llm",
+        ))
+        healer.set_llm_doctor(doctor)
+        result = healer.self_heal("A", IncidentType.MEMORY_EXHAUSTED, "OOM")
+        assert result.status == RecoveryStatus.ESCALATED
+        assert result.diagnosed_by == "policy"
+        assert result.action.action_type == RecoveryActionType.ALERT_HUMAN
+        assert result.action.params["blocked_action"] == "restart_agent"
+
+    def test_auth_error_llm_action_escalates(self):
+        healer = SelfHealer(level=SelfHealLevel.FULL_AUTO)
+        healer.load_rules([])
+        doctor = LLMDoctor()
+        doctor.set_diagnose_fn(lambda err, ctx: RecoveryAction(
+            action_type=RecoveryActionType.RETRY,
+            description="Retry auth",
+            source="llm",
+        ))
+        healer.set_llm_doctor(doctor)
+        result = healer.self_heal("A", IncidentType.AUTH_ERROR, "401")
+        assert result.status == RecoveryStatus.ESCALATED
+        assert result.diagnosed_by == "policy"
+        assert result.action.action_type == RecoveryActionType.ALERT_HUMAN
+
 
 # ── Self Healer: Escalation ────────────────────────────────────
 

@@ -76,6 +76,39 @@ class RecoveryStatus(Enum):
     SKIPPED = "skipped"
 
 
+HIGH_RISK_LLM_ACTIONS = {
+    RecoveryActionType.ROLLBACK,
+    RecoveryActionType.RESTART_AGENT,
+}
+
+INCIDENT_ACTION_DENYLIST = {
+    IncidentType.AUTH_ERROR: {
+        RecoveryActionType.RETRY,
+        RecoveryActionType.ROLLBACK,
+        RecoveryActionType.MODEL_FALLBACK,
+        RecoveryActionType.RESTART_AGENT,
+    },
+    IncidentType.UNKNOWN: {
+        RecoveryActionType.ROLLBACK,
+        RecoveryActionType.RESTART_AGENT,
+    },
+}
+
+
+def is_recovery_action_allowed(
+    action_type: RecoveryActionType,
+    incident_type: IncidentType,
+    level: SelfHealLevel,
+    source: str,
+) -> bool:
+    """Return whether an action can be applied without human review."""
+    if action_type in INCIDENT_ACTION_DENYLIST.get(incident_type, set()):
+        return False
+    if source == "llm" and level == SelfHealLevel.FULL_AUTO:
+        return action_type not in HIGH_RISK_LLM_ACTIONS
+    return True
+
+
 # ── Data Classes ────────────────────────────────────────────────
 
 @dataclass
@@ -171,6 +204,7 @@ class HealResult:
     diagnosed_by: str = ""
     ledger_entry: RecoveryLedgerEntry | None = None
     detail: str = ""
+    restore_context: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -180,6 +214,8 @@ class HealResult:
             "status": self.status.value,
             "diagnosed_by": self.diagnosed_by,
             "detail": self.detail,
+            "incident_id": self.ledger_entry.incident_id if self.ledger_entry else 0,
+            "restore_context": self.restore_context,
         }
 
 
@@ -336,6 +372,12 @@ class SelfHealer:
         """
         effective_level = level_override or self.level
         context = context or {}
+        # Coerce string incident_type to enum (from convenience functions)
+        if isinstance(incident_type, str):
+            try:
+                incident_type = IncidentType(incident_type)
+            except ValueError:
+                incident_type = IncidentType.UNKNOWN
         cleanup = False
         if level_override is not None:
             original_level = self.level
@@ -400,6 +442,26 @@ class SelfHealer:
             )
             if llm_action is not None:
                 llm_action.source = "llm"
+                if not is_recovery_action_allowed(
+                    llm_action.action_type, incident_type, effective_level, "llm",
+                ):
+                    llm_action = RecoveryAction(
+                        action_type=RecoveryActionType.ALERT_HUMAN,
+                        description=(
+                            "LLM suggested a high-risk recovery action; "
+                            "human approval required"
+                        ),
+                        params={
+                            "blocked_action": llm_action.action_type.value,
+                            "blocked_source": "llm",
+                        },
+                        confidence=llm_action.confidence,
+                        source="policy",
+                    )
+                    return self._finalize(
+                        agent_name, incident_type, error_message, llm_action,
+                        RecoveryStatus.ESCALATED, "policy", workspace_id, context,
+                    )
                 status = (RecoveryStatus.ATTEMPTED if effective_level == SelfHealLevel.FULL_AUTO
                           else RecoveryStatus.ESCALATED)
                 return self._finalize(

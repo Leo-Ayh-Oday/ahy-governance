@@ -123,10 +123,12 @@ class RecoveryLearner:
         min_occurrences: int = 3,
         min_confidence: float = 0.7,
         min_success_rate: float = 0.6,
+        auto_enable_learned_rules: bool = False,
     ):
         self.min_occurrences = min_occurrences
         self.min_confidence = min_confidence
         self.min_success_rate = min_success_rate
+        self.auto_enable_learned_rules = auto_enable_learned_rules
         self._db = None
         self._rule_engine: RuleEngine | None = None
 
@@ -210,11 +212,12 @@ class RecoveryLearner:
             )
             new_rules.append(rule)
 
-            # Persist to DB
-            self._persist_rule(rule, workspace_id)
+            # Persist learned rules as disabled by default; operators can approve
+            # them after reviewing the source ledger evidence.
+            self._persist_rule(rule, workspace_id, enabled=self.auto_enable_learned_rules)
 
-            # Load into engine
-            if self._rule_engine:
+            # Load into engine only when explicitly configured.
+            if self.auto_enable_learned_rules and self._rule_engine:
                 self._rule_engine.load_rules([rule])
 
         result.new_rules = new_rules
@@ -233,7 +236,7 @@ class RecoveryLearner:
             )
         return []
 
-    def _persist_rule(self, rule: RecoveryRule, workspace_id: str):
+    def _persist_rule(self, rule: RecoveryRule, workspace_id: str, enabled: bool = False):
         if self._db and self._db.enabled:
             try:
                 self._db.recovery_rules_upsert(
@@ -244,7 +247,7 @@ class RecoveryLearner:
                     recovery_action=rule.recovery_action_type.value,
                     priority=rule.priority,
                     cooldown_seconds=rule.cooldown_seconds,
-                    enabled=True,
+                    enabled=enabled,
                     workspace_id=workspace_id,
                 )
             except Exception:

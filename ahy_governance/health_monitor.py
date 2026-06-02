@@ -295,6 +295,33 @@ class HealthMonitor:
             if m.status in (AgentStatus.UNHEALTHY, AgentStatus.OFFLINE)
         ]
 
+    def auto_heal_check(self, workspace_id: str = "") -> list[dict]:
+        """Scan for unhealthy/offline agents and trigger self-healing.
+
+        Returns list of HealResult dicts, one per agent that was checked.
+        """
+        from .self_healer import get_healer, IncidentType
+
+        unhealthy = self.get_unhealthy_agents(workspace_id)
+        results = []
+        for m in unhealthy:
+            md = m.to_dict()
+            incident = "timeout" if md.get("latency_p95", 0) > 300 else "execution_error"
+            try:
+                it = IncidentType(incident)
+            except ValueError:
+                it = IncidentType.UNKNOWN
+
+            heal_result = get_healer().self_heal(
+                m.agent_name, it,
+                f"Agent {m.agent_name} is {md.get('status', 'unhealthy')} "
+                f"(success_rate={md.get('success_rate', 0):.1%}, p95={md.get('latency_p95', 0):.0f}ms)",
+                context={"metrics": md},
+                workspace_id=workspace_id,
+            )
+            results.append(heal_result.to_dict())
+        return results
+
     # ── Agent Registry ────────────────────────────────────────
 
     def agent_register(self, agent_id: str, workspace_id: str, agent_name: str,

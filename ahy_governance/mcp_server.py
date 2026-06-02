@@ -182,16 +182,24 @@ def ahy_self_heal(
     error_message: str,
     context_json: str = "",
     self_heal_level: str = "",
+    workspace_id: str = "",
 ) -> str:
     """Trigger self-healing for an agent. incident_type: hallucination, execution_error, timeout, rate_limit, auth_error, token_spike, memory_exhausted, dependency_failure, output_invalid, unknown. self_heal_level (optional override): rule_only, llm_assisted, full_auto."""
     from .self_healer import get_healer, SelfHealLevel, IncidentType
-    healer = get_healer()
     level_override = None
     if self_heal_level:
         try:
             level_override = SelfHealLevel(self_heal_level)
         except ValueError:
             pass
+    if level_override == SelfHealLevel.FULL_AUTO and not _full_auto_enabled():
+        return json.dumps({
+            "error": (
+                "full_auto self-healing is disabled for MCP. "
+                "Set AHY_MCP_FULL_AUTO=1 to enable."
+            )
+        }, ensure_ascii=False)
+    healer = get_healer()
     try:
         it = IncidentType(incident_type)
     except ValueError:
@@ -201,6 +209,7 @@ def ahy_self_heal(
     except json.JSONDecodeError:
         return json.dumps({"error": "Invalid JSON in context_json"}, ensure_ascii=False)
     result = healer.self_heal(agent_name, it, error_message, ctx,
+                              workspace_id=workspace_id,
                               level_override=level_override)
     return _to_json(result)
 
@@ -231,7 +240,7 @@ def ahy_recovery_history(
         agent_name=agent_name,
         incident_type=incident_type,
         workspace_id=workspace_id,
-        limit=limit,
+        limit=_clamp_limit(limit),
     )
     return json.dumps(entries, ensure_ascii=False, indent=2, default=str)
 
@@ -250,6 +259,14 @@ def ahy_scan_and_learn(workspace_id: str = "") -> str:
     learner.set_rule_engine(healer._rule_engine)
     result = learner.scan_and_learn(workspace_id)
     return _to_json(result)
+
+
+@mcp.tool()
+def ahy_auto_heal_check(workspace_id: str = "") -> str:
+    """Scan for unhealthy/offline agents and auto-trigger self-healing."""
+    from .health_monitor import get_monitor
+    results = get_monitor().auto_heal_check(workspace_id)
+    return json.dumps(results, ensure_ascii=False, indent=2, default=str)
 
 
 # ── Memory Tools ──────────────────────────────────────────────
@@ -358,6 +375,18 @@ def ahy_evaluate_agent_level(
 
 def _admin_enabled() -> bool:
     return os.environ.get("AHY_MCP_ADMIN", "0") == "1"
+
+
+def _full_auto_enabled() -> bool:
+    return os.environ.get("AHY_MCP_FULL_AUTO", "0") == "1"
+
+
+def _clamp_limit(limit: int, default: int = 100, maximum: int = 500) -> int:
+    try:
+        value = int(limit)
+    except (TypeError, ValueError):
+        value = default
+    return max(1, min(value, maximum))
 
 
 def _admin_guard():

@@ -117,6 +117,10 @@ from .self_healer import (
 from .recovery_rules import default_recovery_rules
 from .llm_diagnose import make_deepseek_diagnose_fn
 from .recovery_learner import RecoveryLearner, LearnResult, get_learner, scan_and_learn
+from .checkpoint_store import (
+    CheckpointStore, Checkpoint, get_checkpoint_store,
+    save_checkpoint, load_checkpoint,
+)
 
 # ── Cost Advisor ────────────────────────────────────────────────
 from .cost_advisor import (
@@ -284,6 +288,11 @@ __all__ = [
     "LearnResult",
     "get_learner",
     "scan_and_learn",
+    "CheckpointStore",
+    "Checkpoint",
+    "get_checkpoint_store",
+    "save_checkpoint",
+    "load_checkpoint",
     # SDK Decorator
     "track",
     # Cost Advisor

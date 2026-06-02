@@ -90,6 +90,13 @@ class GovernancePipeline(GovernanceCollector):
             {"model": event.model, "input": event.input},
             event.session_id, workspace_id=self.workspace_id,
         )
+        # Save checkpoint for context recovery
+        if event.input:
+            from .checkpoint_store import get_checkpoint_store
+            get_checkpoint_store().save(
+                event.agent_name, event.session_id, event.input,
+                step="start", workspace_id=self.workspace_id,
+            )
 
     def on_agent_end(self, event: AgentEndEvent) -> None:
         from .health_monitor import get_monitor
@@ -108,6 +115,13 @@ class GovernancePipeline(GovernanceCollector):
                 "total_latency_ms": event.total_latency_ms,
             },
             event.session_id, workspace_id=self.workspace_id,
+        )
+        # Save checkpoint on completion
+        from .checkpoint_store import get_checkpoint_store
+        get_checkpoint_store().save(
+            event.agent_name, event.session_id,
+            {"output": event.output, "success": event.success},
+            step="end", workspace_id=self.workspace_id,
         )
 
     # ── LLM hooks ────────────────────────────────────────────────
@@ -151,6 +165,30 @@ class GovernancePipeline(GovernanceCollector):
 
     # ── Error hook ───────────────────────────────────────────────
 
+    _ERROR_TYPE_MAP: dict[str, str] = {
+        "timeout": "timeout", "TimeoutError": "timeout",
+        "rate_limit": "rate_limit", "RateLimitError": "rate_limit",
+        "auth": "auth_error", "AuthenticationError": "auth_error",
+        "permission": "auth_error", "PermissionError": "auth_error",
+        "memory": "memory_exhausted", "MemoryError": "memory_exhausted",
+        "validation": "output_invalid", "ValidationError": "output_invalid",
+        "schema": "output_invalid", "SchemaError": "output_invalid",
+        "connection": "timeout", "ConnectionError": "timeout",
+        "dependency": "dependency_failure",
+        "runtime": "execution_error", "RuntimeError": "execution_error",
+        "exception": "execution_error",
+    }
+
+    @classmethod
+    def _map_error_to_incident(cls, error_type: str) -> str:
+        if not error_type:
+            return "unknown"
+        lower = error_type.lower()
+        for key, incident in cls._ERROR_TYPE_MAP.items():
+            if key.lower() in lower:
+                return incident
+        return "unknown"
+
     def on_error(self, event: AgentErrorEvent) -> None:
         from .health_monitor import get_monitor
         from .audit_logger import get_auditor
@@ -162,6 +200,30 @@ class GovernancePipeline(GovernanceCollector):
             AuditEventType.AGENT_ERROR, event.agent_name,
             {"error": event.error_message, "type": event.error_type},
             event.session_id, workspace_id=self.workspace_id,
+        )
+        # Auto-trigger self-healing
+        from .self_healer import get_healer, IncidentType
+        from .checkpoint_store import get_checkpoint_store
+
+        incident_type = self._map_error_to_incident(event.error_type)
+        try:
+            it = IncidentType(incident_type)
+        except ValueError:
+            it = IncidentType.UNKNOWN
+
+        checkpoint = get_checkpoint_store().load_latest(
+            event.agent_name, event.session_id, self.workspace_id,
+        )
+        ctx = {
+            "error_type": event.error_type,
+            "session_id": event.session_id,
+        }
+        if checkpoint:
+            ctx["checkpoint"] = checkpoint.to_dict()
+
+        get_healer().self_heal(
+            event.agent_name, it, event.error_message,
+            context=ctx, workspace_id=self.workspace_id,
         )
 
     # ── Identity ─────────────────────────────────────────────────
