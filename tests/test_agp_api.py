@@ -54,6 +54,25 @@ class TestAgentDiscoverRegister:
         assert data["total"] == 1
         assert data["candidates"][0]["registerable"] is False
 
+    def test_import_config_can_add_known_root_and_ignore(self, monkeypatch, tmp_path):
+        import ahy_governance.agent_import_scanner as scanner
+        monkeypatch.setattr(scanner, "KNOWN_ROOTS_PATH", tmp_path / "known-roots.json")
+        monkeypatch.setattr(scanner, "IGNORE_PATH", tmp_path / "ignore.json")
+
+        root = str(tmp_path / "Ahy Agent")
+        ignored = str(tmp_path / "Ahy Agent" / "OpenManus")
+
+        known_resp = client.post("/api/agent/import-config/known-roots", json={"path": root})
+        ignore_resp = client.post("/api/agent/import-config/ignore", json={"path": ignored})
+        config_resp = client.get("/api/agent/import-config")
+
+        assert known_resp.status_code == 200
+        assert ignore_resp.status_code == 200
+        assert root in known_resp.json()["known_roots"]
+        assert ignored in ignore_resp.json()["ignored_paths"]
+        assert root in config_resp.json()["known_roots"]
+        assert ignored in config_resp.json()["ignored_paths"]
+
     def test_requires_explicit_selection(self):
         response = client.post("/api/agent/discover/register", json={})
 

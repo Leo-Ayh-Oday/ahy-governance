@@ -1,6 +1,12 @@
 import json
+from pathlib import Path
 
-from ahy_governance.agent_import_scanner import ImportCandidateScanner, scan_import_candidates
+from ahy_governance.agent_import_scanner import (
+    ImportCandidateScanner,
+    add_ignore_path,
+    add_known_root,
+    scan_import_candidates,
+)
 
 
 def test_scans_known_codex_config_without_registering(monkeypatch, tmp_path):
@@ -108,3 +114,44 @@ def test_parent_agent_workspace_wins_over_downloaded_child_project(monkeypatch, 
     assert len(candidates) == 1
     assert candidates[0].name == "Ahy Agent"
     assert candidates[0].confidence == "high"
+
+
+def test_known_roots_are_included_in_default_scan(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+
+    import ahy_governance.agent_import_scanner as scanner
+    monkeypatch.setattr(scanner, "KNOWN_ROOTS_PATH", tmp_path / "known-roots.json")
+    monkeypatch.setattr(scanner, "IGNORE_PATH", tmp_path / "ignore.json")
+    monkeypatch.setattr(scanner, "_default_search_roots", lambda: [])
+
+    ahy = tmp_path / "Ahy Agent"
+    ahy.mkdir()
+    (ahy / "agent.py").write_text("print('agent')\n", encoding="utf-8")
+    (ahy / "skills").mkdir()
+
+    add_known_root(ahy)
+
+    candidates = scan_import_candidates()
+
+    assert [Path(c.source_path).name for c in candidates] == ["Ahy Agent"]
+
+
+def test_ignore_path_filters_candidate_and_children(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+
+    import ahy_governance.agent_import_scanner as scanner
+    monkeypatch.setattr(scanner, "KNOWN_ROOTS_PATH", tmp_path / "known-roots.json")
+    monkeypatch.setattr(scanner, "IGNORE_PATH", tmp_path / "ignore.json")
+
+    project = tmp_path / "ignored-agent"
+    project.mkdir()
+    (project / "agent.py").write_text("print('agent')\n", encoding="utf-8")
+    (project / "skills").mkdir()
+
+    add_ignore_path(project)
+
+    assert scan_import_candidates([tmp_path]) == []

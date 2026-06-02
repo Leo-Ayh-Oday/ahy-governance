@@ -1831,6 +1831,10 @@ class AgentBatchBody(BaseModel):
     agents: list[AgentRegisterBody]
 
 
+class AgentImportPathBody(BaseModel):
+    path: str
+
+
 @app.get("/api/models")
 async def list_models():
     """Return all supported models grouped by provider (from cost tracker pricing)."""
@@ -2025,6 +2029,32 @@ async def agent_import_candidates(roots: str = ""):
         "total": len(candidates),
         "candidates": [c.to_dict() for c in candidates],
     }
+
+
+@app.get("/api/agent/import-config")
+async def agent_import_config():
+    """Return scanner known roots and ignored paths."""
+    from ahy_governance.agent_import_scanner import load_known_roots, load_ignore_paths
+    return {
+        "known_roots": [str(p) for p in load_known_roots()],
+        "ignored_paths": [str(p) for p in load_ignore_paths()],
+    }
+
+
+@app.post("/api/agent/import-config/known-roots")
+async def agent_import_add_known_root(data: AgentImportPathBody):
+    from ahy_governance.agent_import_scanner import add_known_root
+    if not data.path:
+        raise HTTPException(400, "path is required")
+    return {"known_roots": add_known_root(data.path)}
+
+
+@app.post("/api/agent/import-config/ignore")
+async def agent_import_add_ignore(data: AgentImportPathBody):
+    from ahy_governance.agent_import_scanner import add_ignore_path
+    if not data.path:
+        raise HTTPException(400, "path is required")
+    return {"ignored_paths": add_ignore_path(data.path)}
 
 
 @app.post("/api/agent/discover/register")

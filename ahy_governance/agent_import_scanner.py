@@ -17,6 +17,11 @@ from typing import Any
 from .agent_registry import _default_search_roots
 
 
+REGISTRY_DIR = Path.home() / ".agent-registry"
+KNOWN_ROOTS_PATH = REGISTRY_DIR / "known-roots.json"
+IGNORE_PATH = REGISTRY_DIR / "ignore.json"
+
+
 @dataclass
 class ImportCandidate:
     candidate_id: str
@@ -38,9 +43,14 @@ class ImportCandidateScanner:
 
     def scan(self, roots: list[str | Path] | None = None) -> list[ImportCandidate]:
         candidates: dict[str, ImportCandidate] = {}
+        ignored = _load_ignore_paths()
         for candidate in self._scan_known_clients():
+            if _is_ignored(candidate.source_path, ignored):
+                continue
             candidates.setdefault(candidate.candidate_id, candidate)
         for candidate in self._scan_project_roots(roots):
+            if _is_ignored(candidate.source_path, ignored):
+                continue
             candidates.setdefault(candidate.candidate_id, candidate)
         return sorted(candidates.values(), key=lambda c: (c.kind, c.name, c.source_path))
 
@@ -76,7 +86,7 @@ class ImportCandidateScanner:
         return results
 
     def _scan_project_roots(self, roots: list[str | Path] | None) -> list[ImportCandidate]:
-        search_roots = [Path(r).expanduser() for r in roots] if roots is not None else _default_search_roots()
+        search_roots = [Path(r).expanduser() for r in roots] if roots is not None else _default_import_roots()
         results: list[ImportCandidate] = []
         seen: set[str] = set()
         for root in search_roots:
@@ -95,6 +105,88 @@ class ImportCandidateScanner:
                 if candidate:
                     results.append(candidate)
         return results
+
+
+def _default_import_roots() -> list[Path]:
+    roots = list(_default_search_roots())
+    roots.extend(load_known_roots())
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        try:
+            resolved = root.expanduser().resolve()
+        except Exception:
+            continue
+        if resolved.is_dir() and str(resolved) not in seen:
+            deduped.append(resolved)
+            seen.add(str(resolved))
+    return deduped
+
+
+def load_known_roots() -> list[Path]:
+    return [Path(p) for p in _load_path_list(KNOWN_ROOTS_PATH, key="roots")]
+
+
+def add_known_root(path: str | Path) -> list[str]:
+    resolved = str(Path(path).expanduser().resolve())
+    roots = _load_path_list(KNOWN_ROOTS_PATH, key="roots")
+    if resolved not in roots:
+        roots.append(resolved)
+    _write_path_list(KNOWN_ROOTS_PATH, "roots", roots)
+    return roots
+
+
+def load_ignore_paths() -> list[Path]:
+    return [Path(p) for p in _load_ignore_paths()]
+
+
+def add_ignore_path(path: str | Path) -> list[str]:
+    resolved = str(Path(path).expanduser().resolve())
+    ignored = _load_ignore_paths()
+    if resolved not in ignored:
+        ignored.append(resolved)
+    _write_path_list(IGNORE_PATH, "paths", ignored)
+    return ignored
+
+
+def _load_ignore_paths() -> list[str]:
+    return _load_path_list(IGNORE_PATH, key="paths")
+
+
+def _load_path_list(path: Path, key: str) -> list[str]:
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    values = data.get(key, data if isinstance(data, list) else [])
+    if not isinstance(values, list):
+        return []
+    return [str(v) for v in values if isinstance(v, str) and v.strip()]
+
+
+def _write_path_list(path: Path, key: str, values: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({key: values}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _is_ignored(path: str | Path, ignored: list[str]) -> bool:
+    try:
+        candidate = Path(path).expanduser().resolve()
+    except Exception:
+        return False
+    for raw in ignored:
+        try:
+            ignored_path = Path(raw).expanduser().resolve()
+        except Exception:
+            continue
+        if candidate == ignored_path or ignored_path in candidate.parents:
+            return True
+    return False
 
 
 def _candidate(name: str, kind: str, source_path: Path, confidence: str,
