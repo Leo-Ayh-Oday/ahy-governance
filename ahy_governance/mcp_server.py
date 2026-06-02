@@ -173,6 +173,21 @@ def ahy_detect_anomalies() -> str:
     return _to_json(anomalies)
 
 
+@mcp.tool()
+def ahy_detect_and_heal_anomalies(workspace_id: str = "") -> str:
+    """Scan anomalies and auto-trigger self-healing. Requires AHY_MCP_FULL_AUTO=1."""
+    if not _full_auto_enabled():
+        return json.dumps({
+            "error": (
+                "auto anomaly self-healing is disabled for MCP. "
+                "Set AHY_MCP_FULL_AUTO=1 to enable."
+            )
+        }, ensure_ascii=False)
+    from .anomaly_detector import detect_and_heal_anomalies
+    results = detect_and_heal_anomalies(workspace_id=workspace_id)
+    return json.dumps(results, ensure_ascii=False, indent=2, default=str)
+
+
 # ── Self-Healing Tools ──────────────────────────────────────────
 
 @mcp.tool()
@@ -413,6 +428,16 @@ def ahy_gate_history(workspace_id: str = "", limit: int = 50) -> str:
         registry.set_database(db)
     runs = registry.list_runs(workspace_id=workspace_id, limit=limit)
     return json.dumps(runs, ensure_ascii=False, indent=2)
+
+
+# ── Agent Discovery Tools ───────────────────────────────────────
+
+@mcp.tool()
+def ahy_discover_agents() -> str:
+    """Scan local machine for running agents (config files, processes, ports). Returns discovered agents list."""
+    from .agent_discovery import get_discovery
+    agents = [a.to_dict() for a in get_discovery().scan_local()]
+    return json.dumps(agents, ensure_ascii=False, indent=2)
 
 
 # ── Memory Tools ──────────────────────────────────────────────
@@ -664,6 +689,8 @@ def ahy_get_dashboard(workspace_id: str = "") -> str:
             "policies_total": len(guard.list_policies()),
         },
     }
+    if isinstance(health_data, dict):
+        dashboard.update({k: v for k, v in health_data.items() if k not in dashboard})
     return json.dumps(dashboard, ensure_ascii=False, indent=2, default=str)
 
 

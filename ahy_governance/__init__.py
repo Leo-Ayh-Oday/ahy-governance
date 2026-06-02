@@ -85,6 +85,7 @@ from .anomaly_detector import (
     AnomalyType,
     get_anomaly_detector,
     detect_anomalies,
+    detect_and_heal_anomalies,
 )
 
 # ── Auto Resolver ───────────────────────────────────────────────
@@ -134,6 +135,7 @@ from .output_guard import (
 )
 from .policy_catalog import default_policies
 from .quality_gate import QualityGate, GateConfig, GateResult, run_quality_gate
+from .agent_discovery import AgentDiscovery, DiscoveredAgent, get_discovery, scan_local_agents
 
 # ── Cost Advisor ────────────────────────────────────────────────
 from .cost_advisor import (
@@ -273,6 +275,7 @@ __all__ = [
     "AnomalyType",
     "get_anomaly_detector",
     "detect_anomalies",
+    "detect_and_heal_anomalies",
     # Auto Resolver
     "AutoResolver",
     "Resolution",
@@ -330,6 +333,10 @@ __all__ = [
     "GateConfig",
     "GateResult",
     "run_quality_gate",
+    "AgentDiscovery",
+    "DiscoveredAgent",
+    "get_discovery",
+    "scan_local_agents",
     # SDK Decorator
     "track",
     # Cost Advisor

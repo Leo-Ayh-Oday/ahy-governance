@@ -51,6 +51,7 @@ from ahy_governance import (
     check_conflicts,
     get_auth,
     AuthManager)
+from ahy_governance.application.dashboard_read_model import DashboardReadModel
 
 # Optional imports — modules may not be pushed to GitHub yet
 try:
@@ -97,6 +98,14 @@ async def lifespan(app):
         get_monitor().set_database(db)
         get_tracker().set_database(db)
         get_auditor().set_database(db)
+        from ahy_governance.checkpoint_store import get_checkpoint_store
+        from ahy_governance.self_healer import get_healer
+        from ahy_governance.recovery_learner import get_learner
+        from ahy_governance.evaluator import get_eval_registry
+        get_checkpoint_store().set_database(db)
+        get_healer().set_database(db)
+        get_learner().set_database(db)
+        get_eval_registry().set_database(db)
         backend = "postgres" if os.environ.get("DATABASE_URL", "").startswith("postgres") else "sqlite"
         logger.info("database_initialized", path=db_path, backend=backend)
     except Exception as e:
@@ -567,34 +576,25 @@ def _refresh_demo_heartbeats():
     return  # disabled: no fake heartbeat injection
 
 
+def _dashboard_read_model() -> DashboardReadModel:
+    return DashboardReadModel(get_monitor())
+
+
 @app.get("/api/health/dashboard")
 async def health_dashboard(request: Request):
     _refresh_demo_heartbeats()
-    return get_monitor().get_dashboard_data()
+    return _dashboard_read_model().dashboard()
 
 
 @app.get("/api/health/agents")
 async def health_agents(request: Request):
     _refresh_demo_heartbeats()
-    data = get_monitor().get_all_health()
-    agents_list = []
-    for name, m in data.items():
-        d = m.to_dict()
-        agents_list.append({
-            "agent_name": d["agent_name"],
-            "status": d["status"],
-            "success_rate": d["success_rate"],
-            "latency_p95": d["latency_p95"],
-            "error_rate": d["error_rate"],
-            "last_heartbeat": d["last_heartbeat"],
-            "calls_total": d["total_calls"],
-        })
-    return agents_list
+    return _dashboard_read_model().agents()
 
 
 @app.get("/api/health/agents/{name}")
 async def health_agent(name: str):
-    data = get_monitor().get_agent_health(name)
+    data = _dashboard_read_model().agent(name)
     if data is None:
         return JSONResponse({"error": "Agent not found"}, 404)
     return data
@@ -602,12 +602,12 @@ async def health_agent(name: str):
 
 @app.get("/api/health/unhealthy")
 async def health_unhealthy(request: Request):
-    return get_monitor().get_unhealthy_agents()
+    return _dashboard_read_model().unhealthy()
 
 
 @app.post("/api/health/heartbeat")
 async def health_heartbeat(data: HeartbeatBody):
-    return get_monitor().heartbeat(
+    return _dashboard_read_model().heartbeat(
         data.agent_name, data.status, data.latency_ms
     )
 
@@ -622,38 +622,7 @@ async def health_demo():
       - UNHEALTHY: p95 > 300s OR error_rate > 50%
       - HEALTHY: success >= 95%, p95 < 60s
     """
-    m = get_monitor()
-    import random, time
-
-    # Each agent: (name, heartbeat_status, calls, error_count, base_latency_ms)
-    agents = [
-        # Planner — healthy, fast, zero errors
-        ("Planner",    "healthy",   25, 0,  35),
-        # Executor — healthy but had 1 retry (5% error = right at threshold)
-        ("Executor",   "healthy",   20, 1,  55),
-        # Reviewer — DEGRADED: p95 ~680ms (>>60ms threshold) + 20% error rate
-        ("Reviewer",   "degraded",  20, 4,  280),
-        # Analyst — healthy, moderate latency
-        ("Analyst",    "healthy",   18, 0,  42),
-        # Governor — OFFLINE: heartbeat is > 300s old, no recent calls
-        ("Governor",   "offline",    5, 0,  20),
-    ]
-    for name, _, total_calls, errors, base_lat in agents:
-        m.heartbeat(name, "ok", base_lat)
-        for i in range(total_calls):
-            is_error = (i >= (total_calls - errors))
-            latency = base_lat * (0.6 + 0.8 * random.random())
-            if is_error:
-                latency = 500 + 200 * random.random()
-            elif name == "Reviewer":
-                # Reviewer is consistently slow: p95 will be ~600-700ms
-                latency = 200 + 500 * random.random()
-            m.record_call(name, success=not is_error, latency_ms=latency)
-    # Governor: set heartbeat to 400s ago → auto OFFLINE (threshold: 300s)
-    old = datetime.now(timezone.utc)
-    old = old.replace(second=max(0, old.second - 400))
-    m._heartbeats["Governor"].timestamp = old.isoformat()
-    return {"ok": True}
+    return _dashboard_read_model().seed_demo()
 
 
 # ── Cost Tracker ──────────────────────────────────────────────────
@@ -768,6 +737,43 @@ async def anomalies_scan(request: Request):
     detector = get_anomaly_detector()
     anomalies = detector.scan_all(get_monitor(), get_tracker())
     return [a.to_dict() for a in anomalies]
+
+
+@app.post("/api/anomalies/scan-and-heal")
+async def anomalies_scan_and_heal(request: Request):
+    """Run anomaly detection and trigger self-healing for findings."""
+    if (
+        os.environ.get("AHY_WEB_FULL_AUTO", "0") != "1"
+        and os.environ.get("AHY_FULL_AUTO", "0") != "1"
+    ):
+        raise HTTPException(
+            403,
+            "auto anomaly self-healing is disabled. Set AHY_WEB_FULL_AUTO=1 to enable.",
+        )
+    from ahy_governance.anomaly_detector import detect_and_heal_anomalies
+
+    workspace_id = _get_ws(request)
+    return detect_and_heal_anomalies(
+        get_monitor(), get_tracker(), workspace_id=workspace_id,
+    )
+
+
+@app.get("/api/recovery/history")
+async def recovery_history(
+    request: Request,
+    agent_name: str = "",
+    incident_type: str = "",
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    """Return recovery ledger rows for self-healing audit views."""
+    from ahy_governance.self_healer import get_healer
+
+    return get_healer().ledger.query(
+        agent_name=agent_name,
+        incident_type=incident_type,
+        workspace_id=_get_ws(request),
+        limit=limit,
+    )
 
 
 @app.post("/api/anomalies/demo")
@@ -1976,6 +1982,57 @@ async def agent_list(request: Request):
             return {"agents": [dict(r) for r in rows]}
         return {"agents": agents}
     return {"agents": []}
+
+
+# ── Agent Discovery ───────────────────────────────────────────
+
+@app.get("/api/agent/discover")
+async def agent_discover_stream(request: Request):
+    """SSE streaming: scan local agents one by one, then summarize."""
+    from ahy_governance.agent_discovery import get_discovery
+    from starlette.responses import StreamingResponse
+    discovery = get_discovery()
+
+    async def event_stream():
+        for sse_chunk in discovery.scan_local_stream():
+            yield sse_chunk
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/agent/discover/register")
+async def agent_discover_register(request: Request):
+    """Register discovered agents — all or selected subset."""
+    from ahy_governance.agent_discovery import get_discovery
+    body = await request.json()
+    selected = body.get("agents", [])
+    ws_id = _get_ws(request)
+
+    if selected:
+        agents_to_register = selected
+    else:
+        agents_to_register = [a.to_dict() for a in get_discovery().scan_local()]
+
+    results = []
+    db = getattr(get_monitor(), '_db', None)
+    for a in agents_to_register:
+        agent_id = f"ag_{secrets.token_hex(12)}"
+        now = datetime.now(timezone.utc).isoformat()
+        name = a.get("agent_name", "unknown")
+        url = a.get("upstream_url", "")
+        model = a.get("model", "")
+        if db and db.enabled:
+            db.agent_register(agent_id, ws_id or "", name, model, url, now)
+        get_monitor().heartbeat(name, "ok", 0, ws_id or "")
+        results.append({
+            "agent_id": agent_id, "agent_name": name,
+            "upstream_url": url, "model": model, "registered": True,
+        })
+    return {"registered": len(results), "agents": results}
 
 
 # ── Per-Agent Proxy ─────────────────────────────────────────────
