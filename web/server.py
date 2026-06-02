@@ -1835,6 +1835,11 @@ class AgentImportPathBody(BaseModel):
     path: str
 
 
+class GenerateAgpBody(BaseModel):
+    roots: list[str] | None = None
+    overwrite: bool = False
+
+
 @app.get("/api/models")
 async def list_models():
     """Return all supported models grouped by provider (from cost tracker pricing)."""
@@ -2055,6 +2060,20 @@ async def agent_import_add_ignore(data: AgentImportPathBody):
     if not data.path:
         raise HTTPException(400, "path is required")
     return {"ignored_paths": add_ignore_path(data.path)}
+
+
+@app.post("/api/agent/import-candidates/{candidate_id}/generate-agp")
+async def agent_import_generate_agp(candidate_id: str, data: GenerateAgpBody):
+    """Generate .ahy-agent.json for a confirmed import candidate."""
+    from ahy_governance.agent_import_scanner import generate_agp_manifest
+    try:
+        return generate_agp_manifest(
+            candidate_id,
+            roots=data.roots,
+            overwrite=data.overwrite,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @app.post("/api/agent/discover/register")

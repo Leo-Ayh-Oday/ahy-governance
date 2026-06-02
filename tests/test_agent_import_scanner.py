@@ -5,6 +5,7 @@ from ahy_governance.agent_import_scanner import (
     ImportCandidateScanner,
     add_ignore_path,
     add_known_root,
+    generate_agp_manifest,
     scan_import_candidates,
 )
 
@@ -155,3 +156,53 @@ def test_ignore_path_filters_candidate_and_children(monkeypatch, tmp_path):
     add_ignore_path(project)
 
     assert scan_import_candidates([tmp_path]) == []
+
+
+def test_generate_agp_manifest_for_custom_project_excludes_secrets(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+
+    ahy = tmp_path / "Ahy Agent"
+    ahy.mkdir()
+    (ahy / "agent.py").write_text("print('agent')\n", encoding="utf-8")
+    (ahy / "skills").mkdir()
+    (ahy / "tools").mkdir()
+    (ahy / "config").mkdir()
+    (ahy / "config" / "settings.json").write_text(json.dumps({
+        "version": "0.2.0",
+        "model": {
+            "model": "deepseek-chat",
+            "api_key": "sk-secret",
+        },
+        "channels": {
+            "web": {
+                "host": "127.0.0.1",
+                "port": 8699,
+            }
+        },
+        "feishu": {
+            "app_secret": "secret",
+        },
+    }), encoding="utf-8")
+
+    candidate = scan_import_candidates([ahy])[0]
+    result = generate_agp_manifest(candidate.candidate_id, roots=[ahy])
+
+    manifest_path = ahy / ".ahy-agent.json"
+    text = manifest_path.read_text(encoding="utf-8")
+    data = json.loads(text)
+    assert result["created"] is True
+    assert data["agent_name"] == "Ahy Agent"
+    assert data["framework"] == "ahy"
+    assert data["version"] == "0.2.0"
+    assert data["upstream_url"] == "http://127.0.0.1:8699"
+    assert data["model"] == "deepseek-chat"
+    assert data["registry"]["auto_register"] is False
+    assert "sk-secret" not in text
+    assert "app_secret" not in text
+
+    from ahy_governance.agent_registry import load_manifest
+    loaded = load_manifest(manifest_path)
+    assert loaded.agent_id == "local.ahy-agent"
+

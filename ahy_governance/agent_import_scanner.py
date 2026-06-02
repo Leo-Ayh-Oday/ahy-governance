@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .agent_registry import _default_search_roots
+from .agent_registry import load_manifest
 
 
 REGISTRY_DIR = Path.home() / ".agent-registry"
@@ -53,6 +54,12 @@ class ImportCandidateScanner:
                 continue
             candidates.setdefault(candidate.candidate_id, candidate)
         return sorted(candidates.values(), key=lambda c: (c.kind, c.name, c.source_path))
+
+    def find_candidate(self, candidate_id: str, roots: list[str | Path] | None = None) -> ImportCandidate | None:
+        for candidate in self.scan(roots):
+            if candidate.candidate_id == candidate_id:
+                return candidate
+        return None
 
     def _scan_known_clients(self) -> list[ImportCandidate]:
         home = Path.home()
@@ -149,8 +156,130 @@ def add_ignore_path(path: str | Path) -> list[str]:
     return ignored
 
 
+def generate_agp_manifest(candidate_id: str, roots: list[str | Path] | None = None,
+                          overwrite: bool = False) -> dict[str, Any]:
+    candidate = get_import_candidate_scanner().find_candidate(candidate_id, roots)
+    if candidate is None:
+        raise ValueError(f"Import candidate not found: {candidate_id}")
+    if candidate.kind != "custom_project":
+        raise ValueError(f"AGP manifest generation only supports custom_project candidates, got: {candidate.kind}")
+
+    project = Path(candidate.source_path)
+    manifest_path = project / ".ahy-agent.json"
+    if manifest_path.exists() and not overwrite:
+        return {
+            "created": False,
+            "manifest_path": str(manifest_path.resolve()),
+            "reason": "manifest_exists",
+            "manifest": load_manifest(manifest_path).to_dict(),
+        }
+
+    manifest = _build_manifest_for_candidate(candidate)
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    loaded = load_manifest(manifest_path)
+    return {
+        "created": True,
+        "manifest_path": str(manifest_path.resolve()),
+        "manifest": loaded.to_dict(),
+    }
+
+
 def _load_ignore_paths() -> list[str]:
     return _load_path_list(IGNORE_PATH, key="paths")
+
+
+def _build_manifest_for_candidate(candidate: ImportCandidate) -> dict[str, Any]:
+    project = Path(candidate.source_path)
+    settings = _safe_project_settings(project)
+    agent_id = _slug_agent_id(project.name)
+    web = settings.get("channels", {}).get("web", {}) if isinstance(settings.get("channels"), dict) else {}
+    host = web.get("host", "127.0.0.1") if isinstance(web, dict) else "127.0.0.1"
+    port = web.get("port", 0) if isinstance(web, dict) else 0
+    upstream_url = f"http://{host}:{port}" if port else "stdio://local-agent"
+    model_cfg = settings.get("model", {}) if isinstance(settings.get("model"), dict) else {}
+    model = model_cfg.get("model") if isinstance(model_cfg.get("model"), str) else "unknown"
+
+    evidence = candidate.evidence
+    manifest = {
+        "manifest_version": "1.0",
+        "agent_id": agent_id,
+        "agent_name": candidate.name,
+        "framework": _infer_framework(candidate),
+        "version": str(settings.get("version", "0.1.0")),
+        "upstream_url": upstream_url,
+        "model": model,
+        "description": f"Generated from Ahy Governance import candidate {candidate.candidate_id}.",
+        "capabilities": {
+            "can_read": True,
+            "can_search": any("memory/" in e or "skills/" in e for e in evidence),
+            "can_write_local": any("tools/" in e or "agent.py" in e for e in evidence),
+            "can_execute_shell": (project / "tools").is_dir(),
+            "can_call_network": model != "unknown" or port != 0,
+            "tools": _manifest_tools(project),
+        },
+        "registry": {
+            "enabled": True,
+            "heartbeat_seconds": 30,
+            "auto_register": False,
+        },
+        "auth": {
+            "type": "none",
+        },
+        "metadata": {
+            "source": "import_candidate",
+            "candidate_id": candidate.candidate_id,
+            "confidence": candidate.confidence,
+            "evidence": candidate.evidence,
+        },
+    }
+    if upstream_url.startswith(("http://", "https://")):
+        manifest["health"] = {
+            "url": f"{upstream_url}/health",
+            "method": "GET",
+        }
+    return manifest
+
+
+def _safe_project_settings(project: Path) -> dict[str, Any]:
+    path = project / "config" / "settings.json"
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+def _slug_agent_id(name: str) -> str:
+    import re
+    slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", name.strip().lower()).strip("-")
+    return f"local.{slug or 'agent'}"
+
+
+def _infer_framework(candidate: ImportCandidate) -> str:
+    name = candidate.name.lower()
+    if "ahy" in name or any("config/settings.json" in e for e in candidate.evidence):
+        return "ahy"
+    return "custom"
+
+
+def _manifest_tools(project: Path) -> list[str]:
+    tools = []
+    for dirname, label in (
+        ("skills", "skills"),
+        ("tools", "local-tools"),
+        ("memory", "memory"),
+        ("channels", "channels"),
+    ):
+        if (project / dirname).is_dir():
+            tools.append(label)
+    return tools
 
 
 def _load_path_list(path: Path, key: str) -> list[str]:

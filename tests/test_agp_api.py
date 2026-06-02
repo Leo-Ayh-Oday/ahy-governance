@@ -73,6 +73,23 @@ class TestAgentDiscoverRegister:
         assert root in config_resp.json()["known_roots"]
         assert ignored in config_resp.json()["ignored_paths"]
 
+    def test_generate_agp_endpoint(self, monkeypatch):
+        import ahy_governance.agent_import_scanner as scanner
+
+        monkeypatch.setattr(scanner, "generate_agp_manifest", lambda candidate_id, roots=None, overwrite=False: {
+            "created": True,
+            "manifest_path": "C:/Users/example/Ahy Agent/.ahy-agent.json",
+            "manifest": {"agent_id": "local.ahy-agent"},
+        })
+
+        response = client.post(
+            "/api/agent/import-candidates/ic_test/generate-agp",
+            json={"roots": ["C:/Users/example/Ahy Agent"], "overwrite": False},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["manifest"]["agent_id"] == "local.ahy-agent"
+
     def test_requires_explicit_selection(self):
         response = client.post("/api/agent/discover/register", json={})
 
