@@ -5,27 +5,29 @@
 [![Tests](https://github.com/Leo-Ayh-Oday/ahy-governance/actions/workflows/test.yml/badge.svg)](https://github.com/Leo-Ayh-Oday/ahy-governance/actions/workflows/test.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-purple)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.8.0-orange)](https://pypi.org/project/ahy-governance/)
+[![Version](https://img.shields.io/badge/version-0.9.1-orange)](https://pypi.org/project/ahy-governance/)
 [![Downloads](https://img.shields.io/pypi/dm/ahy-governance)](https://pypi.org/project/ahy-governance/)
 
 [中文文档](README_CN.md)
 
 ## Recent Updates
 
-- **Web Dashboard** — one-command launch, dark monitoring theme, 7 live-updating panels
-- **Transparent Proxy** — OpenAI-compatible endpoint, zero code changes for existing agents
-- **Built-in Auth** — email/password login + JWT + API Key management
-- **Docker Deploy** — single command, supports Zeabur / EdgeOne Pages
+- **AGP Self-Registration** — `.ahy-agent.json` manifest, auto-discover agents across 10 frameworks
+- **18 MCP Tools** — govern agents directly from Claude Code, Cursor, or any MCP client
+- **Self-Healing (3 levels)** — rule → LLM diagnosis → full auto closed-loop recovery
+- **`@track` Decorator** — one line to integrate: cost, health, audit, all automatic
+- **Agent Level Grading** — Level 0-5 auto-evaluation with governance recommendations
 
 ## What You Get
 
 | Problem | Ahy Governance |
 |---------|---------------|
 | Agents conflicting with each other? | Auto-detect and resolve — 5 conflict types |
-| AI costs unpredictable? | Real-time budget visibility + automatic circuit breaker |
+| AI costs unpredictable? | Real-time budget visibility + automatic circuit breaker + model downgrade suggestions |
 | Auditor knocking? | 5-minute compliance evidence export (SOC2 / ISO27001) |
 | Someone jailbreaking your AI? | Prompt injection detection + PII redaction |
-| Intern fat-fingering production? | 3-tier RBAC — who can view, who can change |
+| Agent crashed at 3am? | 3-level self-healing: rule → LLM diagnosis → full-auto recovery |
+| Don't know how many agents you have? | AGP auto-discovery — scans `.ahy-agent.json` manifests |
 
 ---
 
@@ -41,13 +43,17 @@
 
 ---
 
-## 3 Lines to Integrate
+## 1 Line to Integrate
 
 ```python
-from ahy_governance import ConflictDetector, CostTracker, AuditReporter
+from ahy_governance import track
 
-detector = ConflictDetector(); tracker = CostTracker(); auditor = AuditReporter()
+@track(name="my-agent", framework="langgraph", version="1.0.0")
+def my_agent(query: str) -> str:
+    return response
 ```
+
+Cost tracking, health monitoring, audit logging, and auto-registration — all in `@track`. CrewAI and LangChain adapters available.
 
 ---
 
@@ -85,23 +91,19 @@ ahy-dashboard
 # Open http://localhost:8080 — click "Demo Data" to populate
 ```
 
-Or use individual modules:
+Or use the MCP integration — govern agents directly from Claude Code:
+
+```bash
+ahygen mcp init > .mcp.json
+# 18 governance tools now available in your MCP client
+```
 
 ```python
-from ahy_governance import ConflictDetector, CostTracker, AuditReporter
+from ahy_governance import track
 
-# Detect conflicts between agents
-detector = ConflictDetector()
-conflicts = detector.check(agent_outputs, dag_definition)
-
-# Track costs per agent
-tracker = CostTracker()
-tracker.set_budget(limit_usd=100)
-tracker.track("Planner", "claude-opus-4-7", tokens_in=15000, tokens_out=8000)
-
-# Tamper-proof audit logging
-auditor = AuditReporter()
-auditor.log(AuditEventType.AGENT_START, "Planner", {"task": "plan"})
+@track(name="my-agent", framework="langgraph", version="1.0.0")
+def my_agent(query: str) -> str:
+    return response
 ```
 
 ---
@@ -131,39 +133,53 @@ ahy-dashboard
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────┐
-│              Ahy Governance Dashboard                 │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────┐  │
-│  │ Conflict │ │   Cost   │ │  Audit   │ │ Health │  │
-│  │ Detector │ │ Tracker  │ │ Reporter │ │Monitor │  │
-│  └──────────┘ └──────────┘ └──────────┘ └────────┘  │
-├──────────────────────────────────────────────────────┤
-│                 Governance Core                       │
-│  ┌──────────┐ ┌──────────┐ ┌──────────────────────┐  │
-│  │  Memory  │ │   RBAC   │ │    Prompt Guard      │  │
-│  │ Sharing  │ │          │ │ (Injection + PII)    │  │
-│  └──────────┘ └──────────┘ └──────────────────────┘  │
-├──────────────────────────────────────────────────────┤
-│      Existing Agent Core (not included — bring your own)  │
-│      Orchestrator  │  TraceLogger  │  Router         │
-└──────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                  Ahy Governance Dashboard                     │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────────────┐  │
+│  │ Conflict │ │   Cost   │ │  Audit   │ │    Health      │  │
+│  │ Detector │ │ Tracker  │ │ Reporter │ │   Monitor      │  │
+│  └──────────┘ └──────────┘ └──────────┘ └────────────────┘  │
+├──────────────────────────────────────────────────────────────┤
+│                     Governance Core                           │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐ │
+│  │  Memory  │ │   RBAC   │ │  Prompt  │ │  Self-Healing    │ │
+│  │ Sharing  │ │          │ │  Guard   │ │  (3-level)       │ │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────────────┘ │
+│  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────┐  │
+│  │ Agent Discovery  │ │  Anomaly         │ │  Agent Level  │  │
+│  │ (AGP manifest)   │ │  Detector        │ │  Grading      │  │
+│  └──────────────────┘ └──────────────────┘ └──────────────┘  │
+├──────────────────────────────────────────────────────────────┤
+│                      MCP Interface (18 tools)                 │
+│   Cost │ Sanitize │ Health │ Self-Heal │ Audit │ Eval │ Admin │
+├──────────────────────────────────────────────────────────────┤
+│         Existing Agents (bring your own)                      │
+│         CrewAI │ LangChain │ AutoGen │ OpenAI │ Claude Code   │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Modules (7/7 complete)
+## Modules
 
-| # | Module | Tests | Description |
-|---|--------|-------|-------------|
-| 1 | Conflict Detector | 23 | 5 conflict types: fact, format, dependency, scope, confidence |
-| 2 | Cost Tracker | 46 | 22 model pricings, budget circuit breaker, per-agent attribution |
-| 3 | Audit Reporter | 35 | SHA-256 hash chain, SOC2/ISO27001 compliance export |
-| 4 | Health Monitor | 45 | Heartbeats, P50-P99 latency, error rates, DAG pipeline tracking |
-| 5 | Auth & RBAC | 59 | Email/password + JWT, 3-tier roles, API key lifecycle |
-| 6 | Prompt Guard | 39 | 13 injection patterns, PII redaction, sanitize pipeline |
-| 7 | Memory Sharing | 34 | Namespaced key-value, TTL expiry, tag search |
+| # | Module | Description |
+|---|--------|-------------|
+| 1 | Conflict Detector | 5 conflict types: fact, format, dependency, scope, confidence + semantic |
+| 2 | Cost Tracker | 22 model pricings, budget circuit breaker, cost advisor with model downgrade suggestions |
+| 3 | Audit Reporter | SHA-256 hash chain, SOC2/ISO27001 compliance export, tamper-proof verification |
+| 4 | Health Monitor | Heartbeats, P50-P99 latency, error rates, DAG pipeline tracking |
+| 5 | Auth & RBAC | Email/password + JWT, 3-tier roles, API key lifecycle |
+| 6 | Prompt Guard | 13 injection patterns, PII redaction, 18 guardrail policies, 3 time points (pre/mid/post) |
+| 7 | Memory Sharing | Namespaced key-value, TTL expiry, tag search |
+| 8 | Self-Healing | 3-level recovery: rule → LLM diagnosis → full-auto, auto-learns new rules from recovery ledger |
+| 9 | Agent Discovery | AGP manifest scan + process/port fallback, auto-detect 10 frameworks |
+| 10 | Anomaly Detector | Token spikes, repeated calls, memory leaks, auto-trigger self-healing |
+| 11 | Agent Level Grading | Level 0-5 maturity evaluation with governance recommendations |
+| 12 | MCP Server | 18 governance tools via FastMCP, stdio + SSE dual transport |
+| 13 | SDK Decorator | `@track` one-line integration, sync/async, CrewAI + LangChain adapters |
+| 14 | Quality Gate | Dataset + scorer evaluation, pass/fail thresholds, CI/CD integration |
 
-**384 tests, 0 failures.**
+**900+ tests, 0 failures.**
 
 ---
 
@@ -187,9 +203,10 @@ Questions or feedback? Open an issue or email [2115464137@qq.com](mailto:2115464
 
 | Project | Description | Status |
 |---------|-------------|--------|
-| [Kingdee MCP Server](https://github.com/Leo-Ayh-Oday/kingdee-mcp-server) | AI Agent ↔ 金蝶云星空 ERP | ✅ MIT |
-| [WeCom MCP Server](https://github.com/Leo-Ayh-Oday/wecom-mcp-server) | AI Agent ↔ 企业微信 | ✅ MIT |
-| [Ahy Agent](https://github.com/Leo-Ayh-Oday/ahy-agent) | Multi-agent orchestration harness | v0.6.0 |
+| [Ahy Agent](https://github.com/Leo-Ayh-Oday/ahy-agent) | Multi-agent orchestration harness (DAG + 4-layer compression + triple memory) | v0.6.0 |
+| [Kingdee MCP Server](https://github.com/Leo-Ayh-Oday/kingdee-mcp-server) | AI Agent ↔ 金蝶云星空 ERP, 7 tools, 11 document types | ✅ MIT |
+| [WeCom MCP Server](https://github.com/Leo-Ayh-Oday/wecom-mcp-server) | AI Agent ↔ 企业微信, 5 message types | ✅ MIT |
+| [cognitio](https://github.com/Leo-Ayh-Oday/cognitio) | Multi-LLM deliberation engine with 3-round negotiation protocol | ✅ |
 
 ---
 
