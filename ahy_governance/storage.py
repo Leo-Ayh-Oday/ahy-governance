@@ -152,8 +152,19 @@ class Database:
             agent_id TEXT PRIMARY KEY,
             workspace_id TEXT NOT NULL DEFAULT '',
             agent_name TEXT NOT NULL,
-            model TEXT NOT NULL,
-            upstream_url TEXT NOT NULL,
+            framework TEXT NOT NULL DEFAULT '',
+            version TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            upstream_url TEXT NOT NULL DEFAULT '',
+            capabilities TEXT NOT NULL DEFAULT '{}',
+            registry_config TEXT NOT NULL DEFAULT '{}',
+            governance_config TEXT NOT NULL DEFAULT '{}',
+            tags TEXT NOT NULL DEFAULT '[]',
+            config_path TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'registered',
+            last_heartbeat TEXT NOT NULL DEFAULT '',
+            pid INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_ra_ws ON registered_agents(workspace_id);
@@ -289,6 +300,7 @@ class Database:
         );
         """)
         self._conn.commit()
+        self._migrate_registered_agents()
 
     # ── Health ──────────────────────────────────────────────
 
@@ -478,12 +490,82 @@ class Database:
 
     # ── Registered Agents ───────────────────────────────────
 
+    def _migrate_registered_agents(self):
+        """Add AGP columns to existing registered_agents table."""
+        agp_columns = {
+            "framework": "TEXT NOT NULL DEFAULT ''",
+            "version": "TEXT NOT NULL DEFAULT ''",
+            "description": "TEXT NOT NULL DEFAULT ''",
+            "capabilities": "TEXT NOT NULL DEFAULT '{}'",
+            "registry_config": "TEXT NOT NULL DEFAULT '{}'",
+            "governance_config": "TEXT NOT NULL DEFAULT '{}'",
+            "tags": "TEXT NOT NULL DEFAULT '[]'",
+            "config_path": "TEXT NOT NULL DEFAULT ''",
+            "status": "TEXT NOT NULL DEFAULT 'registered'",
+            "last_heartbeat": "TEXT NOT NULL DEFAULT ''",
+            "pid": "INTEGER NOT NULL DEFAULT 0",
+        }
+        existing = set()
+        try:
+            cur = self._conn.execute("PRAGMA table_info(registered_agents)")
+            existing = {row[1] for row in cur.fetchall()}
+        except Exception:
+            return
+        for col, col_def in agp_columns.items():
+            if col not in existing:
+                try:
+                    self._conn.execute(f"ALTER TABLE registered_agents ADD COLUMN {col} {col_def}")
+                except Exception:
+                    pass
+        # Create AGP indexes (safe to fail if column doesn't exist yet)
+        for idx_col in ("framework", "status"):
+            try:
+                self._conn.execute(
+                    f"CREATE INDEX IF NOT EXISTS idx_ra_{idx_col} ON registered_agents({idx_col})"
+                )
+            except Exception:
+                pass
+        self._conn.commit()
+
+        # Make model and upstream_url nullable for AGP compatibility
+        if "model" in existing:
+            try:
+                # SQLite doesn't support ALTER COLUMN, but the new schema is fine —
+                # old rows with model set are compatible with DEFAULT '' in new code
+                pass
+            except Exception:
+                pass
+
     def agent_register(self, agent_id: str, workspace_id: str, agent_name: str,
-                        model: str, upstream_url: str, created_at: str) -> None:
+                        model: str, upstream_url: str, created_at: str,
+                        framework: str = "", version: str = "", description: str = "",
+                        capabilities: str = "{}", registry_config: str = "{}",
+                        governance_config: str = "{}", config_path: str = "") -> None:
+        """Backward-compatible wrapper. Prefer agent_register_full for new code."""
+        self.agent_register_full(
+            agent_id=agent_id, workspace_id=workspace_id, agent_name=agent_name,
+            framework=framework, version=version, description=description,
+            model=model, upstream_url=upstream_url,
+            capabilities=capabilities, registry_config=registry_config,
+            governance_config=governance_config, config_path=config_path,
+            created_at=created_at,
+        )
+
+    def agent_register_full(self, agent_id: str, workspace_id: str, agent_name: str,
+                            framework: str = "", version: str = "", description: str = "",
+                            model: str = "", upstream_url: str = "",
+                            capabilities: str = "{}", registry_config: str = "{}",
+                            governance_config: str = "{}", config_path: str = "",
+                            created_at: str = "") -> None:
         self._execute(
-            "INSERT INTO registered_agents (agent_id, workspace_id, agent_name, model, upstream_url, created_at) "
-            "VALUES (?,?,?,?,?,?)",
-            (agent_id, workspace_id, agent_name, model, upstream_url, created_at),
+            "INSERT OR REPLACE INTO registered_agents "
+            "(agent_id, workspace_id, agent_name, framework, version, description, "
+            "model, upstream_url, capabilities, registry_config, governance_config, "
+            "tags, config_path, status, last_heartbeat, pid, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (agent_id, workspace_id, agent_name, framework, version, description,
+             model, upstream_url, capabilities, registry_config, governance_config,
+             "[]", config_path, "registered", "", 0, created_at),
         )
 
     def agent_get(self, agent_id: str) -> dict | None:
@@ -491,8 +573,49 @@ class Database:
 
     def agent_list(self, workspace_id: str = "") -> list[dict]:
         rows = self._fetchall(
-            "SELECT agent_id, workspace_id, agent_name, model, upstream_url, created_at FROM registered_agents WHERE workspace_id=?",
+            "SELECT * FROM registered_agents WHERE workspace_id=? "
+            "ORDER BY framework, agent_name",
             (workspace_id,)
+        )
+        return [dict(r) for r in rows]
+
+    def agent_list_by_status(self, workspace_id: str = "", status: str = "") -> list[dict]:
+        if status:
+            rows = self._fetchall(
+                "SELECT * FROM registered_agents WHERE workspace_id=? AND status=? "
+                "ORDER BY framework, agent_name",
+                (workspace_id, status)
+            )
+        else:
+            rows = self._fetchall(
+                "SELECT * FROM registered_agents WHERE workspace_id=? "
+                "ORDER BY framework, agent_name",
+                (workspace_id,)
+            )
+        return [dict(r) for r in rows]
+
+    def agent_update_status(self, agent_id: str, status: str, pid: int = 0) -> bool:
+        cur = self._execute(
+            "UPDATE registered_agents SET status=?, pid=?, last_heartbeat=? WHERE agent_id=?",
+            (status, pid, datetime.now(timezone.utc).isoformat(), agent_id),
+        )
+        return cur.rowcount > 0
+
+    def agent_heartbeat(self, agent_id: str) -> bool:
+        cur = self._execute(
+            "UPDATE registered_agents SET last_heartbeat=? WHERE agent_id=?",
+            (datetime.now(timezone.utc).isoformat(), agent_id),
+        )
+        return cur.rowcount > 0
+
+    def agent_list_stale(self, workspace_id: str = "",
+                         max_age_seconds: int = 120) -> list[dict]:
+        from datetime import timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)).isoformat()
+        rows = self._fetchall(
+            "SELECT * FROM registered_agents WHERE workspace_id=? "
+            "AND status='running' AND last_heartbeat < ?",
+            (workspace_id, cutoff),
         )
         return [dict(r) for r in rows]
 

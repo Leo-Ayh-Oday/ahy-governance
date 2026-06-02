@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ahy-governance.local/schemas/agp.schema.json",
+  "title": "AGP Agent Manifest",
+  "description": "Agent Governance Protocol manifest for agents discoverable by Ahy Governance.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "manifest_version",
+    "agent_name",
+    "framework",
+    "version",
+    "upstream_url",
+    "model",
+    "capabilities",
+    "registry"
+  ],
+  "properties": {
+    "manifest_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "agent_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "agent_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "framework": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "upstream_url": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^(https?|stdio)://"
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "can_read",
+        "can_search",
+        "can_write_local"
+      ],
+      "properties": {
+        "can_read": {
+          "type": "boolean"
+        },
+        "can_search": {
+          "type": "boolean"
+        },
+        "can_write_local": {
+          "type": "boolean"
+        },
+        "can_execute_shell": {
+          "type": "boolean"
+        },
+        "can_call_network": {
+          "type": "boolean"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "heartbeat_seconds"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "heartbeat_seconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 3600
+        },
+        "auto_register": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "GET",
+            "POST"
+          ],
+          "default": "GET"
+        }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "none",
+            "bearer",
+            "api_key",
+            "basic",
+            "custom"
+          ]
+        },
+        "env": {
+          "type": "string",
+          "description": "Optional environment variable name that contains the secret. The secret value must not be stored in the manifest.",
+          "pattern": "^[A-Z_][A-Z0-9_]*$"
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "token"
+            ]
+          },
+          {
+            "required": [
+              "api_key"
+            ]
+          },
+          {
+            "required": [
+              "password"
+            ]
+          },
+          {
+            "required": [
+              "secret"
+            ]
+          }
+        ]
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean",
+          "array",
+          "object",
+          "null"
+        ]
+      },
+      "properties": {
+        "owner": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

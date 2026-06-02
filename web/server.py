@@ -500,6 +500,17 @@ def get_db():
     return _get_db()
 
 
+def _ensure_db():
+    """Return a usable governance database for routes that persist agent metadata."""
+    db = getattr(get_monitor(), "_db", None)
+    if db is not None and getattr(db, "enabled", False):
+        return db
+    from ahy_governance.storage import create_database
+    db = create_database()
+    get_monitor().set_database(db)
+    return db
+
+
 def get_current_user(request: Request) -> str:
     """Extract and verify JWT token or API key from Authorization header."""
     auth_header = request.headers.get("Authorization", "")
@@ -2006,32 +2017,37 @@ async def agent_discover_stream(request: Request):
 
 @app.post("/api/agent/discover/register")
 async def agent_discover_register(request: Request):
-    """Register discovered agents — all or selected subset."""
-    from ahy_governance.agent_discovery import get_discovery
+    """Register discovered agents by agent_id. Uses AGP standard."""
+    from ahy_governance.agent_registry import get_registrar, scan_filesystem
     body = await request.json()
-    selected = body.get("agents", [])
+    selected_ids = body.get("agent_ids", [])
+    register_all = bool(body.get("register_all", False))
     ws_id = _get_ws(request)
 
-    if selected:
-        agents_to_register = selected
+    if not isinstance(selected_ids, list):
+        raise HTTPException(400, "agent_ids must be a list")
+    if not selected_ids and not register_all:
+        raise HTTPException(400, "agent_ids are required unless register_all=true")
+
+    registrar = get_registrar()
+    registrar.set_database(_ensure_db())
+
+    manifests = scan_filesystem()
+    manifest_by_id = {m.agent_id: m for m in manifests}
+    if register_all:
+        to_register = manifests
     else:
-        agents_to_register = [a.to_dict() for a in get_discovery().scan_local()]
+        missing = [agent_id for agent_id in selected_ids if agent_id not in manifest_by_id]
+        if missing:
+            raise HTTPException(404, {"missing_agent_ids": missing})
+        to_register = [manifest_by_id[agent_id] for agent_id in selected_ids]
 
     results = []
-    db = getattr(get_monitor(), '_db', None)
-    for a in agents_to_register:
-        agent_id = f"ag_{secrets.token_hex(12)}"
-        now = datetime.now(timezone.utc).isoformat()
-        name = a.get("agent_name", "unknown")
-        url = a.get("upstream_url", "")
-        model = a.get("model", "")
-        if db and db.enabled:
-            db.agent_register(agent_id, ws_id or "", name, model, url, now)
-        get_monitor().heartbeat(name, "ok", 0, ws_id or "")
-        results.append({
-            "agent_id": agent_id, "agent_name": name,
-            "upstream_url": url, "model": model, "registered": True,
-        })
+    for m in to_register:
+        result = registrar.register(m, ws_id or "")
+        get_monitor().heartbeat(m.agent_name, "ok", 0, ws_id or "")
+        results.append(result)
+
     return {"registered": len(results), "agents": results}
 
 

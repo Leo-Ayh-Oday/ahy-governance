@@ -137,6 +137,13 @@ from .policy_catalog import default_policies
 from .quality_gate import QualityGate, GateConfig, GateResult, run_quality_gate
 from .agent_discovery import AgentDiscovery, DiscoveredAgent, get_discovery, scan_local_agents
 
+# ── AGP — Agent Governance Protocol ───────────────────────────
+from .agent_registry import (
+    AgentManifest, RuntimeRegistry, AgentRegistrar, get_registrar,
+    scan_filesystem, load_manifest, validate_manifest,
+    AGP_SCHEMA, AGPValidationError,
+)
+
 # ── Cost Advisor ────────────────────────────────────────────────
 from .cost_advisor import (
     CostAdvisor,
@@ -337,6 +344,16 @@ __all__ = [
     "DiscoveredAgent",
     "get_discovery",
     "scan_local_agents",
+    # AGP
+    "AgentManifest",
+    "RuntimeRegistry",
+    "AgentRegistrar",
+    "get_registrar",
+    "scan_filesystem",
+    "load_manifest",
+    "validate_manifest",
+    "AGP_SCHEMA",
+    "AGPValidationError",
     # SDK Decorator
     "track",
     # Cost Advisor

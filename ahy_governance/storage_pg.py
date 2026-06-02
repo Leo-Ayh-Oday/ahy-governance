@@ -128,8 +128,19 @@ class PostgresDatabase:
             Column("agent_id", Text, primary_key=True),
             Column("workspace_id", Text, nullable=False, default=""),
             Column("agent_name", Text, nullable=False),
-            Column("model", Text, nullable=False),
-            Column("upstream_url", Text, nullable=False),
+            Column("framework", Text, nullable=False, default=""),
+            Column("version", Text, nullable=False, default=""),
+            Column("description", Text, nullable=False, default=""),
+            Column("model", Text, nullable=False, default=""),
+            Column("upstream_url", Text, nullable=False, default=""),
+            Column("capabilities", Text, nullable=False, default="{}"),
+            Column("registry_config", Text, nullable=False, default="{}"),
+            Column("governance_config", Text, nullable=False, default="{}"),
+            Column("tags", Text, nullable=False, default="[]"),
+            Column("config_path", Text, nullable=False, default=""),
+            Column("status", Text, nullable=False, default="registered"),
+            Column("last_heartbeat", Text, nullable=False, default=""),
+            Column("pid", Integer, nullable=False, default=0),
             Column("created_at", Text, nullable=False),
         )
         Index("idx_ra_ws", "workspace_id")
@@ -405,11 +416,56 @@ class PostgresDatabase:
 
     # ── Registered Agents ───────────────────────────────────
     def agent_register(self, agent_id: str, workspace_id: str, agent_name: str,
-                        model: str, upstream_url: str, created_at: str) -> None:
+                        model: str, upstream_url: str, created_at: str,
+                        framework: str = "", version: str = "", description: str = "",
+                        capabilities: str = "{}", registry_config: str = "{}",
+                        governance_config: str = "{}", config_path: str = "") -> None:
+        self.agent_register_full(
+            agent_id=agent_id, workspace_id=workspace_id, agent_name=agent_name,
+            framework=framework, version=version, description=description,
+            model=model, upstream_url=upstream_url,
+            capabilities=capabilities, registry_config=registry_config,
+            governance_config=governance_config, config_path=config_path,
+            created_at=created_at,
+        )
+
+    def agent_register_full(self, agent_id: str, workspace_id: str, agent_name: str,
+                            framework: str = "", version: str = "", description: str = "",
+                            model: str = "", upstream_url: str = "",
+                            capabilities: str = "{}", registry_config: str = "{}",
+                            governance_config: str = "{}", config_path: str = "",
+                            created_at: str = "") -> None:
         self._exec("""
-            INSERT INTO registered_agents (agent_id, workspace_id, agent_name, model, upstream_url, created_at)
-            VALUES (:id, :ws, :nm, :md, :url, :ts)
-        """, {"id": agent_id, "ws": workspace_id, "nm": agent_name, "md": model, "url": upstream_url, "ts": created_at})
+            INSERT INTO registered_agents (
+                agent_id, workspace_id, agent_name, framework, version, description,
+                model, upstream_url, capabilities, registry_config, governance_config,
+                tags, config_path, status, last_heartbeat, pid, created_at
+            )
+            VALUES (
+                :id, :ws, :nm, :fw, :ver, :desc, :md, :url, :caps, :reg, :gov,
+                '[]', :path, 'registered', '', 0, :ts
+            )
+            ON CONFLICT (agent_id) DO UPDATE SET
+                workspace_id = EXCLUDED.workspace_id,
+                agent_name = EXCLUDED.agent_name,
+                framework = EXCLUDED.framework,
+                version = EXCLUDED.version,
+                description = EXCLUDED.description,
+                model = EXCLUDED.model,
+                upstream_url = EXCLUDED.upstream_url,
+                capabilities = EXCLUDED.capabilities,
+                registry_config = EXCLUDED.registry_config,
+                governance_config = EXCLUDED.governance_config,
+                config_path = EXCLUDED.config_path,
+                status = EXCLUDED.status,
+                created_at = EXCLUDED.created_at
+        """, {
+            "id": agent_id, "ws": workspace_id, "nm": agent_name,
+            "fw": framework, "ver": version, "desc": description,
+            "md": model, "url": upstream_url, "caps": capabilities,
+            "reg": registry_config, "gov": governance_config,
+            "path": config_path, "ts": created_at,
+        })
 
     def agent_get(self, agent_id: str) -> dict | None:
         return self._fetchone("""
@@ -418,9 +474,47 @@ class PostgresDatabase:
 
     def agent_list(self, workspace_id: str = "") -> list[dict]:
         return self._fetchall("""
-            SELECT agent_id, workspace_id, agent_name, model, upstream_url, created_at
-            FROM registered_agents WHERE workspace_id=:ws
+            SELECT * FROM registered_agents WHERE workspace_id=:ws
+            ORDER BY framework, agent_name
         """, {"ws": workspace_id})
+
+    def agent_list_by_status(self, workspace_id: str = "", status: str = "") -> list[dict]:
+        if status:
+            return self._fetchall("""
+                SELECT * FROM registered_agents WHERE workspace_id=:ws AND status=:status
+                ORDER BY framework, agent_name
+            """, {"ws": workspace_id, "status": status})
+        return self.agent_list(workspace_id)
+
+    def agent_update_status(self, agent_id: str, status: str, pid: int = 0) -> bool:
+        from datetime import datetime, timezone
+        with self._engine.begin() as conn:
+            result = conn.execute(text("""
+                UPDATE registered_agents
+                SET status=:status, pid=:pid, last_heartbeat=:ts
+                WHERE agent_id=:id
+            """), {
+                "status": status, "pid": pid,
+                "ts": datetime.now(timezone.utc).isoformat(), "id": agent_id,
+            })
+            return result.rowcount > 0
+
+    def agent_heartbeat(self, agent_id: str) -> bool:
+        from datetime import datetime, timezone
+        with self._engine.begin() as conn:
+            result = conn.execute(text("""
+                UPDATE registered_agents SET last_heartbeat=:ts WHERE agent_id=:id
+            """), {"ts": datetime.now(timezone.utc).isoformat(), "id": agent_id})
+            return result.rowcount > 0
+
+    def agent_list_stale(self, workspace_id: str = "",
+                         max_age_seconds: int = 120) -> list[dict]:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)).isoformat()
+        return self._fetchall("""
+            SELECT * FROM registered_agents
+            WHERE workspace_id=:ws AND status='running' AND last_heartbeat < :cutoff
+        """, {"ws": workspace_id, "cutoff": cutoff})
 
     def agent_delete(self, agent_id: str) -> bool:
         with self._engine.begin() as conn:
