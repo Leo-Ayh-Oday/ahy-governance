@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -259,6 +260,33 @@ class Database:
             created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_cp_agent_sess ON agent_checkpoints(agent_name, session_id, workspace_id);
+
+        CREATE TABLE IF NOT EXISTS eval_datasets (
+            dataset_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL DEFAULT '',
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            case_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS eval_cases (
+            case_id TEXT PRIMARY KEY,
+            dataset_id TEXT NOT NULL,
+            input_json TEXT NOT NULL,
+            expected_json TEXT,
+            tags TEXT NOT NULL DEFAULT '[]',
+            FOREIGN KEY (dataset_id) REFERENCES eval_datasets(dataset_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS eval_runs (
+            run_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL DEFAULT '',
+            dataset_id TEXT NOT NULL,
+            scorers TEXT NOT NULL,
+            summary_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
         """)
         self._conn.commit()
 
@@ -696,6 +724,59 @@ class Database:
             self._conn.commit()
             return cur.rowcount
 
+    # ── Eval Datasets ────────────────────────────────────────
+
+    def dataset_insert(self, dataset_id: str, name: str, description: str,
+                       case_count: int, workspace_id: str = "") -> None:
+        self._execute(
+            "INSERT INTO eval_datasets (dataset_id, workspace_id, name, description, case_count, created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (dataset_id, self._w(workspace_id), name, description, case_count,
+             datetime.now(timezone.utc).isoformat()),
+        )
+
+    def dataset_list(self, workspace_id: str = "") -> list[dict]:
+        return self._fetchall(
+            "SELECT * FROM eval_datasets WHERE workspace_id=? ORDER BY created_at DESC",
+            (self._w(workspace_id),),
+        )
+
+    def case_insert(self, case_id: str, dataset_id: str, input_json: str,
+                    expected_json: str | None, tags: str) -> None:
+        self._execute(
+            "INSERT INTO eval_cases (case_id, dataset_id, input_json, expected_json, tags) "
+            "VALUES (?,?,?,?,?)",
+            (case_id, dataset_id, input_json, expected_json, tags),
+        )
+
+    def case_list(self, dataset_id: str) -> list[dict]:
+        return self._fetchall(
+            "SELECT * FROM eval_cases WHERE dataset_id=? ORDER BY case_id",
+            (dataset_id,),
+        )
+
+    def eval_run_insert(self, run_id: str, dataset_id: str, scorers: str,
+                        summary_json: str, workspace_id: str = "") -> None:
+        self._execute(
+            "INSERT INTO eval_runs (run_id, workspace_id, dataset_id, scorers, summary_json, created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (run_id, self._w(workspace_id), dataset_id, scorers, summary_json,
+             datetime.now(timezone.utc).isoformat()),
+        )
+
+    def eval_run_list(self, dataset_id: str = "", workspace_id: str = "",
+                      limit: int = 50) -> list[dict]:
+        if dataset_id:
+            return self._fetchall(
+                "SELECT * FROM eval_runs WHERE workspace_id=? AND dataset_id=? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (self._w(workspace_id), dataset_id, limit),
+            )
+        return self._fetchall(
+            "SELECT * FROM eval_runs WHERE workspace_id=? ORDER BY created_at DESC LIMIT ?",
+            (self._w(workspace_id), limit),
+        )
+
     # ── Lifecycle ───────────────────────────────────────────
 
     def clear_all(self) -> None:
@@ -708,6 +789,7 @@ class Database:
             "anomalies", "cost_recommendations",
             "recovery_ledger", "recovery_rules",
             "agent_checkpoints",
+            "eval_datasets", "eval_cases", "eval_runs",
         ]
         for t in tables:
             self._execute(f"DELETE FROM {t}")

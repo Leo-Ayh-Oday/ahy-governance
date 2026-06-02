@@ -121,6 +121,19 @@ from .checkpoint_store import (
     CheckpointStore, Checkpoint, get_checkpoint_store,
     save_checkpoint, load_checkpoint,
 )
+from .evaluator import (
+    EvalRegistry, EvalScore, EvalCase, EvalRun, EvalSummary,
+    Scorer, CodeScorer, LLMScorer,
+    get_eval_registry, run_eval,
+    make_builtin_llm_scorers,
+)
+from .output_guard import (
+    OutputGuard, GuardPolicy, GuardVerdict, GuardResult,
+    GuardBlockedError, GuardAction, GuardTiming,
+    get_output_guard,
+)
+from .policy_catalog import default_policies
+from .quality_gate import QualityGate, GateConfig, GateResult, run_quality_gate
 
 # ── Cost Advisor ────────────────────────────────────────────────
 from .cost_advisor import (
@@ -293,6 +306,30 @@ __all__ = [
     "get_checkpoint_store",
     "save_checkpoint",
     "load_checkpoint",
+    "EvalRegistry",
+    "EvalScore",
+    "EvalCase",
+    "EvalRun",
+    "EvalSummary",
+    "Scorer",
+    "CodeScorer",
+    "LLMScorer",
+    "get_eval_registry",
+    "run_eval",
+    "make_builtin_llm_scorers",
+    "OutputGuard",
+    "GuardPolicy",
+    "GuardVerdict",
+    "GuardResult",
+    "GuardBlockedError",
+    "GuardAction",
+    "GuardTiming",
+    "get_output_guard",
+    "default_policies",
+    "QualityGate",
+    "GateConfig",
+    "GateResult",
+    "run_quality_gate",
     # SDK Decorator
     "track",
     # Cost Advisor

@@ -264,9 +264,155 @@ def ahy_scan_and_learn(workspace_id: str = "") -> str:
 @mcp.tool()
 def ahy_auto_heal_check(workspace_id: str = "") -> str:
     """Scan for unhealthy/offline agents and auto-trigger self-healing."""
+    if not _full_auto_enabled():
+        return json.dumps({
+            "error": (
+                "auto self-healing checks are disabled for MCP. "
+                "Set AHY_MCP_FULL_AUTO=1 to enable."
+            )
+        }, ensure_ascii=False)
     from .health_monitor import get_monitor
     results = get_monitor().auto_heal_check(workspace_id)
     return json.dumps(results, ensure_ascii=False, indent=2, default=str)
+
+
+# ── Evaluation Tools ──────────────────────────────────────────
+
+@mcp.tool()
+def ahy_list_scorers() -> str:
+    """List all available evaluation scorers."""
+    from .evaluator import get_eval_registry
+    scorers = get_eval_registry().list_scorers()
+    return json.dumps(scorers, ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+def ahy_run_eval(
+    dataset_id: str,
+    scorer_names_json: str,
+    workspace_id: str = "",
+) -> str:
+    """Run evaluation scorers against a dataset. scorer_names_json: JSON array of scorer names like ["hallucination_check","output_schema"]."""
+    from .evaluator import get_eval_registry
+    names = json.loads(scorer_names_json)
+    db = _ensure_db()
+    registry = get_eval_registry()
+    if registry._db is None:
+        registry.set_database(db)
+    result = registry.run_eval(dataset_id, names, workspace_id)
+    return _to_json(result)
+
+
+@mcp.tool()
+def ahy_create_dataset(
+    name: str,
+    cases_json: str,
+    description: str = "",
+    workspace_id: str = "",
+) -> str:
+    """Create an eval dataset from JSON. cases_json: [{"input": {...}, "expected": {...}, "tags": [...]}, ...]"""
+    from .evaluator import get_eval_registry, EvalCase
+    raw = json.loads(cases_json)
+    cases = [EvalCase(
+        case_id=f"case-{i:04d}",
+        input=c.get("input", {}),
+        expected=c.get("expected"),
+        tags=c.get("tags", []),
+    ) for i, c in enumerate(raw)]
+    db = _ensure_db()
+    registry = get_eval_registry()
+    if registry._db is None:
+        registry.set_database(db)
+    ds_id = registry.create_dataset(name, cases, description, workspace_id)
+    return json.dumps({"dataset_id": ds_id, "case_count": len(cases)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def ahy_eval_report(
+    dataset_id: str = "",
+    workspace_id: str = "",
+    limit: int = 50,
+) -> str:
+    """Query evaluation run history and reports."""
+    from .evaluator import get_eval_registry
+    db = _ensure_db()
+    registry = get_eval_registry()
+    if registry._db is None:
+        registry.set_database(db)
+    runs = registry.list_runs(dataset_id, workspace_id, limit)
+    return json.dumps(runs, ensure_ascii=False, indent=2)
+
+
+# ── Guardrail Tools ────────────────────────────────────────────
+
+@mcp.tool()
+def ahy_list_policies() -> str:
+    """List all available guardrail policies."""
+    from .output_guard import get_output_guard
+    return json.dumps(get_output_guard().list_policies(), ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+def ahy_check_policy(
+    agent_name: str,
+    event_type: str,
+    input_json: str = "{}",
+    timing: str = "pre",
+) -> str:
+    """Check guardrail policies against input. timing: pre, mid, post."""
+    from .output_guard import get_output_guard
+    guard = get_output_guard()
+    data = json.loads(input_json)
+    if timing == "pre":
+        result = guard.check_pre(agent_name, event_type, data)
+    elif timing == "mid":
+        result = guard.check_mid(agent_name, data)
+    else:
+        result = guard.check_post(agent_name, data)
+    return json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+def ahy_update_policy(policy_id: str, enabled: bool) -> str:
+    """Enable or disable a guardrail policy."""
+    from .output_guard import get_output_guard
+    get_output_guard().update_policy(policy_id, enabled)
+    return json.dumps({"policy_id": policy_id, "enabled": enabled}, ensure_ascii=False)
+
+
+# ── Quality Gate Tools ─────────────────────────────────────────
+
+@mcp.tool()
+def ahy_run_quality_gate(
+    gate_id: str,
+    dataset_id: str,
+    scorers_json: str,
+    thresholds_json: str = "{}",
+    workspace_id: str = "",
+) -> str:
+    """Run a quality gate against a dataset. scorers_json: ["s1","s2"]. thresholds_json: {"s1":0.8,"overall":0.7}."""
+    from .quality_gate import GateConfig, QualityGate
+    scorers = json.loads(scorers_json)
+    thresholds = json.loads(thresholds_json)
+    db = _ensure_db()
+    config = GateConfig(gate_id=gate_id, dataset_id=dataset_id,
+                        scorers=scorers, thresholds=thresholds)
+    gate = QualityGate(gate_id, config)
+    gate.set_database(db)
+    result = gate.run(workspace_id)
+    return json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+def ahy_gate_history(workspace_id: str = "", limit: int = 50) -> str:
+    """Query quality gate run history (uses eval runs as backing store)."""
+    from .evaluator import get_eval_registry
+    db = _ensure_db()
+    registry = get_eval_registry()
+    if registry._db is None:
+        registry.set_database(db)
+    runs = registry.list_runs(workspace_id=workspace_id, limit=limit)
+    return json.dumps(runs, ensure_ascii=False, indent=2)
 
 
 # ── Memory Tools ──────────────────────────────────────────────
@@ -473,11 +619,52 @@ def ahy_verify_audit_integrity(workspace_id: str = "") -> str:
 
 @mcp.tool()
 def ahy_get_dashboard(workspace_id: str = "") -> str:
-    """Get the full health dashboard overview (admin only)."""
+    """Get the full governance dashboard — health, self-healing, evaluations, costs, guardrails (admin only)."""
     _admin_guard()
     from .health_monitor import get_monitor
-    dashboard = get_monitor().get_dashboard_data(workspace_id)
-    return _to_json(dashboard)
+    from .self_healer import get_healer
+    from .output_guard import get_output_guard
+    from .evaluator import get_eval_registry
+    from .cost_tracker import get_tracker
+
+    db = _ensure_db()
+    monitor = get_monitor()
+    healer = get_healer()
+    guard = get_output_guard()
+    registry = get_eval_registry()
+    if registry._db is None:
+        registry.set_database(db)
+    tracker = get_tracker()
+
+    health_data = monitor.get_dashboard_data(workspace_id)
+    eval_runs = registry.list_runs(workspace_id=workspace_id, limit=10)
+    recovery_entries = db.recovery_ledger_list(workspace_id=workspace_id, limit=100) if db.enabled else []
+    auto_resolved = sum(1 for e in recovery_entries if e.get("diagnosed_by") in ("rule", "ledger"))
+    rules = healer.rules
+    total_cost = sum(e.cost_usd for e in tracker._entries) if tracker._entries else 0
+
+    dashboard = {
+        "agents": health_data,
+        "self_healing": {
+            "total_incidents": len(recovery_entries),
+            "auto_resolved": auto_resolved,
+            "escalated": len(recovery_entries) - auto_resolved,
+            "rules_active": len(rules),
+            "rules_learned": len([r for r in rules if r.id.startswith("learned-")]),
+        },
+        "evaluations": {
+            "total_runs": len(eval_runs),
+            "latest_score": float(eval_runs[0].get("summary_json", "{}")) if eval_runs else None,
+        },
+        "costs": {
+            "total_usd": round(total_cost, 4),
+        },
+        "guardrails": {
+            "policies_active": sum(1 for p in guard.list_policies() if p.get("enabled")),
+            "policies_total": len(guard.list_policies()),
+        },
+    }
+    return json.dumps(dashboard, ensure_ascii=False, indent=2, default=str)
 
 
 # ── Entry point ───────────────────────────────────────────────
