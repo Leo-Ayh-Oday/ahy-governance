@@ -167,6 +167,45 @@ class PostgresDatabase:
             Column("data", Text, nullable=False, default="{}"),
         )
 
+        Table("recovery_ledger", m,
+            Column("id", Integer, primary_key=True, autoincrement=True),
+            Column("workspace_id", Text, nullable=False, default=""),
+            Column("agent_name", Text, nullable=False),
+            Column("incident_type", Text, nullable=False),
+            Column("error_message", Text, nullable=False, default=""),
+            Column("recovery_action", Text, nullable=False, default=""),
+            Column("diagnosed_by", Text, nullable=False, default="rule"),
+            Column("success", Integer, nullable=False, default=0),
+            Column("confidence", Float, nullable=False, default=0.0),
+            Column("evidence", Text, nullable=False, default="{}"),
+            Column("timestamp", Text, nullable=False),
+        )
+        Index("idx_rl_agent", "agent_name", "workspace_id")
+        Index("idx_rl_type", "incident_type")
+
+        Table("recovery_rules", m,
+            Column("rule_id", Text, primary_key=True),
+            Column("workspace_id", Text, nullable=False, default=""),
+            Column("name", Text, nullable=False),
+            Column("incident_type", Text, nullable=False),
+            Column("pattern", Text, nullable=False, default=""),
+            Column("recovery_action", Text, nullable=False),
+            Column("priority", Integer, nullable=False, default=50),
+            Column("cooldown_seconds", Integer, nullable=False, default=300),
+            Column("enabled", Integer, nullable=False, default=1),
+        )
+
+        Table("agent_checkpoints", m,
+            Column("id", Integer, primary_key=True, autoincrement=True),
+            Column("workspace_id", Text, nullable=False, default=""),
+            Column("agent_name", Text, nullable=False),
+            Column("session_id", Text, nullable=False, default=""),
+            Column("state_json", Text, nullable=False),
+            Column("step", Text, nullable=False, default=""),
+            Column("created_at", Text, nullable=False),
+        )
+        Index("idx_cp_agent_sess", "agent_name", "session_id", "workspace_id")
+
     def _w(self, ws: str) -> str:
         return ws or ""
 
@@ -456,12 +495,155 @@ class PostgresDatabase:
             SELECT * FROM compliance_reports WHERE workspace_id=:ws ORDER BY compliance_score DESC
         """, {"ws": self._w(workspace_id)})
 
+    def recovery_ledger_insert(self, agent_name: str, incident_type: str,
+                               error_message: str, recovery_action: str,
+                               diagnosed_by: str, success: bool, confidence: float,
+                               evidence: str, timestamp: str, workspace_id: str = "") -> int:
+        with self._engine.begin() as conn:
+            result = conn.execute(text("""
+                INSERT INTO recovery_ledger (workspace_id, agent_name, incident_type,
+                    error_message, recovery_action, diagnosed_by, success, confidence,
+                    evidence, timestamp)
+                VALUES (:ws, :agent, :itype, :err, :action, :diagnosed_by,
+                    :success, :confidence, :evidence, :ts)
+                RETURNING id
+            """), {
+                "ws": self._w(workspace_id),
+                "agent": agent_name,
+                "itype": incident_type,
+                "err": error_message,
+                "action": recovery_action,
+                "diagnosed_by": diagnosed_by,
+                "success": 1 if success else 0,
+                "confidence": confidence,
+                "evidence": evidence,
+                "ts": timestamp,
+            })
+            return int(result.scalar_one())
+
+    def recovery_ledger_list(self, agent_name: str = "", incident_type: str = "",
+                             workspace_id: str = "", limit: int = 100) -> list[dict]:
+        conditions = ["workspace_id=:ws"]
+        params: dict[str, Any] = {"ws": self._w(workspace_id), "lim": limit}
+        if agent_name:
+            conditions.append("agent_name=:agent")
+            params["agent"] = agent_name
+        if incident_type:
+            conditions.append("incident_type=:itype")
+            params["itype"] = incident_type
+        where = " AND ".join(conditions)
+        return self._fetchall(f"""
+            SELECT * FROM recovery_ledger WHERE {where}
+            ORDER BY timestamp DESC LIMIT :lim
+        """, params)
+
+    def recovery_ledger_similar(self, incident_type: str, error_message: str,
+                                workspace_id: str = "", limit: int = 5) -> list[dict]:
+        return self._fetchall("""
+            SELECT * FROM recovery_ledger
+            WHERE workspace_id=:ws AND incident_type=:itype AND success=1
+            ORDER BY timestamp DESC LIMIT :lim
+        """, {"ws": self._w(workspace_id), "itype": incident_type, "lim": limit})
+
+    def recovery_rules_list(self, workspace_id: str = "") -> list[dict]:
+        return self._fetchall("""
+            SELECT * FROM recovery_rules WHERE workspace_id=:ws ORDER BY priority
+        """, {"ws": self._w(workspace_id)})
+
+    def recovery_rules_upsert(self, rule_id: str, name: str, incident_type: str,
+                              pattern: str, recovery_action: str, priority: int,
+                              cooldown_seconds: int, enabled: bool,
+                              workspace_id: str = "") -> None:
+        self._exec("""
+            INSERT INTO recovery_rules (rule_id, workspace_id, name, incident_type,
+                pattern, recovery_action, priority, cooldown_seconds, enabled)
+            VALUES (:rid, :ws, :name, :itype, :pattern, :action, :priority,
+                :cooldown, :enabled)
+            ON CONFLICT (rule_id) DO UPDATE SET
+                workspace_id = EXCLUDED.workspace_id,
+                name = EXCLUDED.name,
+                incident_type = EXCLUDED.incident_type,
+                pattern = EXCLUDED.pattern,
+                recovery_action = EXCLUDED.recovery_action,
+                priority = EXCLUDED.priority,
+                cooldown_seconds = EXCLUDED.cooldown_seconds,
+                enabled = EXCLUDED.enabled
+        """, {
+            "rid": rule_id,
+            "ws": self._w(workspace_id),
+            "name": name,
+            "itype": incident_type,
+            "pattern": pattern,
+            "action": recovery_action,
+            "priority": priority,
+            "cooldown": cooldown_seconds,
+            "enabled": 1 if enabled else 0,
+        })
+
+    def checkpoint_insert(self, agent_name: str, session_id: str,
+                          state_json: str, step: str, created_at: str,
+                          workspace_id: str = "") -> int:
+        with self._engine.begin() as conn:
+            result = conn.execute(text("""
+                INSERT INTO agent_checkpoints (workspace_id, agent_name, session_id, state_json, step, created_at)
+                VALUES (:ws, :agent, :sid, :state, :step, :ts)
+                RETURNING id
+            """), {
+                "ws": self._w(workspace_id),
+                "agent": agent_name,
+                "sid": session_id,
+                "state": state_json,
+                "step": step,
+                "ts": created_at,
+            })
+            return int(result.scalar_one())
+
+    def checkpoint_latest(self, agent_name: str, session_id: str = "",
+                          workspace_id: str = "") -> dict | None:
+        params: dict[str, Any] = {"agent": agent_name, "ws": self._w(workspace_id)}
+        session_filter = ""
+        if session_id:
+            session_filter = "AND session_id=:sid"
+            params["sid"] = session_id
+        return self._fetchone(f"""
+            SELECT * FROM agent_checkpoints
+            WHERE agent_name=:agent AND workspace_id=:ws {session_filter}
+            ORDER BY created_at DESC LIMIT 1
+        """, params)
+
+    def checkpoint_list(self, agent_name: str = "", session_id: str = "",
+                        workspace_id: str = "", limit: int = 50) -> list[dict]:
+        conditions = ["workspace_id=:ws"]
+        params: dict[str, Any] = {"ws": self._w(workspace_id), "lim": limit}
+        if agent_name:
+            conditions.append("agent_name=:agent")
+            params["agent"] = agent_name
+        if session_id:
+            conditions.append("session_id=:sid")
+            params["sid"] = session_id
+        where = " AND ".join(conditions)
+        return self._fetchall(f"""
+            SELECT * FROM agent_checkpoints WHERE {where}
+            ORDER BY created_at DESC LIMIT :lim
+        """, params)
+
+    def checkpoint_prune(self, max_age_days: int, workspace_id: str = "") -> int:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+        with self._engine.begin() as conn:
+            result = conn.execute(text("""
+                DELETE FROM agent_checkpoints WHERE workspace_id=:ws AND created_at < :cutoff
+            """), {"ws": self._w(workspace_id), "cutoff": cutoff})
+            return result.rowcount or 0
+
     # ── Lifecycle ───────────────────────────────────────────
     def clear_all(self) -> None:
         tables = [
             "health_heartbeats", "health_calls", "cost_entries", "cost_budget",
             "conflicts", "audit_entries", "rbac_api_keys", "rbac_users",
             "rbac_workspaces", "memory_entries", "registered_agents",
+            "recovery_ledger", "recovery_rules",
+            "agent_checkpoints",
         ]
         for t in tables:
             self._exec(f"DELETE FROM {t}")

@@ -34,12 +34,50 @@ class TestCreateDatabase:
         assert isinstance(d, Database)
         assert d.enabled
 
-    def test_postgres_url_returns_pg(self):
+    def test_postgres_url_returns_pg(self, monkeypatch):
         # PostgresDatabase requires psycopg2; skip if not installed
         pytest.importorskip("psycopg2")
         from ahy_governance.storage_pg import PostgresDatabase
+
+        def fake_init(self, url=None):
+            self.url = url
+            self.enabled = True
+
+        monkeypatch.setattr(PostgresDatabase, "__init__", fake_init)
         d = create_database("postgresql://localhost/test")
         assert isinstance(d, PostgresDatabase)
+        assert d.url == "postgresql://localhost/test"
+
+    def test_postgres_recovery_schema_and_methods(self):
+        sqlalchemy = pytest.importorskip("sqlalchemy")
+        from ahy_governance.storage_pg import PostgresDatabase
+
+        pg = object.__new__(PostgresDatabase)
+        pg._metadata = sqlalchemy.MetaData()
+        pg._define_tables()
+
+        tables = pg._metadata.tables
+        assert "recovery_ledger" in tables
+        assert "recovery_rules" in tables
+        assert "agent_checkpoints" in tables
+        assert {"workspace_id", "agent_name", "incident_type", "recovery_action"}.issubset(
+            tables["recovery_ledger"].columns.keys()
+        )
+        assert {"rule_id", "workspace_id", "pattern", "enabled"}.issubset(
+            tables["recovery_rules"].columns.keys()
+        )
+        for method in (
+            "recovery_ledger_insert",
+            "recovery_ledger_list",
+            "recovery_ledger_similar",
+            "recovery_rules_list",
+            "recovery_rules_upsert",
+            "checkpoint_insert",
+            "checkpoint_latest",
+            "checkpoint_list",
+            "checkpoint_prune",
+        ):
+            assert hasattr(PostgresDatabase, method)
 
 
 # ── Disabled mode ───────────────────────────────────────────
@@ -350,7 +388,98 @@ class TestRecommendations:
         assert db.recommendations_list() == []
 
 
+class TestRecoveryStorage:
+    def test_recovery_ledger_insert_list_and_similar(self, db):
+        failed_id = db.recovery_ledger_insert(
+            "Planner", "timeout", "slow call", "retry_same_agent",
+            "rule", False, 0.8, '{"source":"test"}',
+            "2026-06-02T00:00:00+00:00", workspace_id="ws1",
+        )
+        success_id = db.recovery_ledger_insert(
+            "Planner", "timeout", "slow call", "retry_same_agent",
+            "llm", True, 0.9, '{"source":"test"}',
+            "2026-06-02T00:01:00+00:00", workspace_id="ws1",
+        )
+        db.recovery_ledger_insert(
+            "Planner", "timeout", "other workspace", "alert_human",
+            "rule", True, 0.4, "{}",
+            "2026-06-02T00:02:00+00:00", workspace_id="ws2",
+        )
+
+        rows = db.recovery_ledger_list(
+            agent_name="Planner", incident_type="timeout", workspace_id="ws1",
+        )
+        similar = db.recovery_ledger_similar("timeout", "slow call", workspace_id="ws1")
+
+        assert failed_id > 0
+        assert success_id > failed_id
+        assert [row["id"] for row in rows] == [success_id, failed_id]
+        assert len(similar) == 1
+        assert similar[0]["id"] == success_id
+        assert similar[0]["success"] == 1
+
+    def test_recovery_rules_upsert_list_and_workspace_isolation(self, db):
+        db.recovery_rules_upsert(
+            "rule-1", "Retry timeout", "timeout", "timeout",
+            "retry_same_agent", 20, 60, True, workspace_id="ws1",
+        )
+        db.recovery_rules_upsert(
+            "rule-2", "Alert", "execution_error", "failed",
+            "alert_human", 30, 120, False, workspace_id="ws2",
+        )
+        db.recovery_rules_upsert(
+            "rule-1", "Retry timeout fast", "timeout", "timeout",
+            "restart_agent", 10, 30, True, workspace_id="ws1",
+        )
+
+        ws1_rules = db.recovery_rules_list("ws1")
+        ws2_rules = db.recovery_rules_list("ws2")
+
+        assert len(ws1_rules) == 1
+        assert ws1_rules[0]["rule_id"] == "rule-1"
+        assert ws1_rules[0]["name"] == "Retry timeout fast"
+        assert ws1_rules[0]["recovery_action"] == "restart_agent"
+        assert ws1_rules[0]["priority"] == 10
+        assert len(ws2_rules) == 1
+        assert ws2_rules[0]["enabled"] == 0
+
+
 # ── Lifecycle ───────────────────────────────────────────────
+
+class TestCheckpoints:
+    def test_insert_and_latest_by_session(self, db):
+        first_id = db.checkpoint_insert(
+            "Planner", "s1", '{"step": 1}', "step-1",
+            "2026-06-02T00:00:00+00:00", workspace_id="ws1",
+        )
+        second_id = db.checkpoint_insert(
+            "Planner", "s1", '{"step": 47}', "step-47",
+            "2026-06-02T00:01:00+00:00", workspace_id="ws1",
+        )
+        latest = db.checkpoint_latest("Planner", "s1", "ws1")
+        assert first_id > 0
+        assert latest["id"] == second_id
+        assert latest["state_json"] == '{"step": 47}'
+        assert latest["step"] == "step-47"
+
+    def test_checkpoint_workspace_isolation(self, db):
+        db.checkpoint_insert("Planner", "s1", '{"ws": 1}', "a", "t1", "ws1")
+        db.checkpoint_insert("Planner", "s1", '{"ws": 2}', "b", "t2", "ws2")
+        assert db.checkpoint_latest("Planner", "s1", "ws1")["state_json"] == '{"ws": 1}'
+        assert db.checkpoint_latest("Planner", "s1", "ws2")["state_json"] == '{"ws": 2}'
+
+    def test_checkpoint_list_and_prune(self, db):
+        db.checkpoint_insert("Planner", "s1", '{"old": true}', "old",
+                             "2020-01-01T00:00:00+00:00", "ws1")
+        db.checkpoint_insert("Planner", "s2", '{"new": true}', "new",
+                             "2999-01-01T00:00:00+00:00", "ws1")
+        rows = db.checkpoint_list(agent_name="Planner", workspace_id="ws1")
+        assert len(rows) == 2
+        assert db.checkpoint_prune(7, "ws1") == 1
+        rows = db.checkpoint_list(agent_name="Planner", workspace_id="ws1")
+        assert len(rows) == 1
+        assert rows[0]["session_id"] == "s2"
+
 
 class TestLifecycle:
     def test_clear_all(self, db):
@@ -361,6 +490,11 @@ class TestLifecycle:
         db.memory_upsert("ns", "k", "v", "A", "[]", 1000, None)
         db.anomaly_insert("T", "A", "H", "d", 1, 0, 0, '{}', "t1")
         db.recommendation_insert("r", "H", "A", "d", "m1", "m2", 0, '{}', "t1")
+        db.recovery_ledger_insert("A", "timeout", "d", "retry_same_agent",
+                                  "rule", True, 0.9, "{}", "t1")
+        db.recovery_rules_upsert("rule-1", "Retry", "timeout", "timeout",
+                                 "retry_same_agent", 1, 60, True)
+        db.checkpoint_insert("A", "s1", '{"step": 1}', "step-1", "t1")
         db.clear_all()
         assert db.heartbeat_all() == []
         assert db.cost_all() == []
@@ -368,6 +502,9 @@ class TestLifecycle:
         assert db.audit_all() == []
         assert db.anomalies_list() == []
         assert db.recommendations_list() == []
+        assert db.recovery_ledger_list() == []
+        assert db.recovery_rules_list() == []
+        assert db.checkpoint_list() == []
 
     def test_close(self, db):
         db.close()

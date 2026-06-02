@@ -139,6 +139,38 @@ class AnomalyDetector:
         anomalies.extend(self.scan_output_length_anomaly(health_monitor))
         return anomalies
 
+    def scan_and_heal(
+        self, health_monitor, cost_tracker, workspace_id: str = "",
+    ) -> list[dict]:
+        """Scan anomalies and trigger self-healing for each finding."""
+        from .checkpoint_store import get_checkpoint_store
+        from .self_healer import IncidentType, get_healer
+
+        results = []
+        checkpoint_store = get_checkpoint_store()
+        healer = get_healer()
+        for anomaly in self.scan_all(health_monitor, cost_tracker):
+            checkpoint = checkpoint_store.load_latest(
+                anomaly.agent_name, workspace_id=workspace_id,
+            )
+            context = {"anomaly": anomaly.to_dict()}
+            if checkpoint:
+                context["checkpoint"] = checkpoint.to_dict()
+
+            incident_type = _incident_for_anomaly(anomaly.anomaly_type)
+            heal_result = healer.self_heal(
+                anomaly.agent_name,
+                incident_type,
+                anomaly.description,
+                context=context,
+                workspace_id=workspace_id,
+            )
+            results.append({
+                "anomaly": anomaly.to_dict(),
+                "healing": heal_result.to_dict(),
+            })
+        return results
+
     # ── Token spike detection ───────────────────────────────────
 
     def scan_token_spikes(self, cost_tracker) -> list[Anomaly]:
@@ -366,3 +398,26 @@ def detect_anomalies(health_monitor=None, cost_tracker=None) -> list[Anomaly]:
     hm = health_monitor or get_monitor()
     ct = cost_tracker or get_tracker()
     return get_anomaly_detector().scan_all(hm, ct)
+
+
+def detect_and_heal_anomalies(
+    health_monitor=None, cost_tracker=None, workspace_id: str = "",
+) -> list[dict]:
+    """Scan anomalies and trigger self-healing for production auto-remediation."""
+    from .health_monitor import get_monitor
+    from .cost_tracker import get_tracker
+    hm = health_monitor or get_monitor()
+    ct = cost_tracker or get_tracker()
+    return get_anomaly_detector().scan_and_heal(hm, ct, workspace_id)
+
+
+def _incident_for_anomaly(anomaly_type: AnomalyType):
+    from .self_healer import IncidentType
+
+    mapping = {
+        AnomalyType.TOKEN_SPIKE: IncidentType.TOKEN_SPIKE,
+        AnomalyType.OUTPUT_LENGTH_ANOMALY: IncidentType.OUTPUT_INVALID,
+        AnomalyType.REPEATED_CALLS: IncidentType.EXECUTION_ERROR,
+        AnomalyType.SUCCESS_RATE_DROP: IncidentType.EXECUTION_ERROR,
+    }
+    return mapping.get(anomaly_type, IncidentType.UNKNOWN)

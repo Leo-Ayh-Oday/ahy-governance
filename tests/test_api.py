@@ -2,6 +2,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
+from unittest.mock import Mock
 from web.server import app
 from ahy_governance import (
     get_monitor,
@@ -30,6 +31,45 @@ class TestAppStartup:
         assert response.status_code == 200
         data = response.json()
         assert data["info"]["title"] == "Ahy Governance Dashboard"
+
+
+class TestAnomalyEndpoints:
+    def test_scan_and_heal_disabled_by_default(self, monkeypatch):
+        monkeypatch.delenv("AHY_WEB_FULL_AUTO", raising=False)
+        monkeypatch.delenv("AHY_FULL_AUTO", raising=False)
+        response = client.post("/api/anomalies/scan-and-heal")
+        assert response.status_code == 403
+        assert "auto anomaly self-healing is disabled" in response.json()["detail"]
+
+    def test_recovery_history_empty_by_default(self):
+        response = client.get("/api/recovery/history")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_recovery_history_queries_ledger(self, monkeypatch):
+        ledger = Mock()
+        ledger.query.return_value = [{
+            "agent_name": "Planner",
+            "incident_type": "execution_error",
+            "recovery_action": "retry",
+            "success": 0,
+        }]
+        healer = Mock()
+        healer.ledger = ledger
+        monkeypatch.setattr("ahy_governance.self_healer.get_healer", lambda: healer)
+
+        response = client.get(
+            "/api/recovery/history?agent_name=Planner&incident_type=execution_error&limit=7"
+        )
+
+        assert response.status_code == 200
+        assert response.json()[0]["agent_name"] == "Planner"
+        ledger.query.assert_called_once_with(
+            agent_name="Planner",
+            incident_type="execution_error",
+            workspace_id="",
+            limit=7,
+        )
 
 
 class TestHealthEndpoints:

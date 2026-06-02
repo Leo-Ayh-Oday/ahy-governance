@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { Activity, Terminal, Zap, Cpu } from 'lucide-react';
 import type { AuditEvent, ConflictStats } from '../../types';
 import { fetchAuditRecent, fetchConflictStats } from '../../api';
+import { SelfHealingConsole } from './SelfHealingConsole';
 
 function deriveLatencyBars(logs: AuditEvent[], buckets: number): number[] {
   const latencies = logs
@@ -62,6 +63,8 @@ export function Observability() {
 
   return (
     <div className="space-y-6">
+      <SelfHealingConsole />
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         <div className="lg:col-span-8 space-y-8">
           <div className="card-elevated rounded-[32px] p-8">

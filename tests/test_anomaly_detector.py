@@ -2,6 +2,7 @@
 
 import time
 from datetime import datetime, timezone, timedelta
+from unittest.mock import Mock
 
 import pytest
 
@@ -14,6 +15,7 @@ from ahy_governance.anomaly_detector import (
     _parse_timestamp,
     get_anomaly_detector,
     detect_anomalies,
+    detect_and_heal_anomalies,
 )
 from ahy_governance.conflict_detector import Severity
 from ahy_governance.cost_tracker import CostTracker, CostEntry
@@ -337,6 +339,60 @@ class TestScanAll:
         assert len(anomalies) == 0
 
 
+class TestScanAndHeal:
+    def test_anomaly_triggers_self_heal_with_checkpoint_context(self, monkeypatch):
+        from ahy_governance.checkpoint_store import Checkpoint
+        from ahy_governance.self_healer import HealResult, IncidentType, RecoveryStatus
+
+        calls = {
+            "Planner": [{"success": True, "latency_ms": 100}] * 16
+            + [{"success": False, "latency_ms": 100}] * 4
+        }
+        hm = _make_health_monitor(calls)
+        ct = _make_cost_tracker([])
+        checkpoint = Checkpoint(
+            checkpoint_id=47,
+            agent_name="Planner",
+            session_id="s1",
+            state={"step": 47},
+            step="step-47",
+            created_at="2026-06-02T00:00:00+00:00",
+        )
+        checkpoint_store = Mock()
+        checkpoint_store.load_latest.return_value = checkpoint
+        healer = Mock()
+
+        def fake_self_heal(agent_name, incident_type, error_message, context, workspace_id):
+            return HealResult(
+                agent_name=agent_name,
+                incident_type=incident_type,
+                status=RecoveryStatus.SUCCEEDED,
+                restore_context={
+                    "checkpoint_id": context["checkpoint"]["checkpoint_id"],
+                    "step": context["checkpoint"]["step"],
+                },
+            )
+
+        healer.self_heal.side_effect = fake_self_heal
+        monkeypatch.setattr(
+            "ahy_governance.checkpoint_store.get_checkpoint_store",
+            lambda: checkpoint_store,
+        )
+        monkeypatch.setattr("ahy_governance.self_healer.get_healer", lambda: healer)
+
+        det = AnomalyDetector(success_rate_drop_threshold=0.20, min_data_points=3)
+        results = det.scan_and_heal(hm, ct, workspace_id="ws1")
+
+        checkpoint_store.load_latest.assert_called_once_with("Planner", workspace_id="ws1")
+        healer.self_heal.assert_called_once()
+        args, kwargs = healer.self_heal.call_args
+        assert args[1] == IncidentType.EXECUTION_ERROR
+        assert kwargs["workspace_id"] == "ws1"
+        assert kwargs["context"]["anomaly"]["type"] == "success_rate_drop"
+        assert kwargs["context"]["checkpoint"]["checkpoint_id"] == 47
+        assert results[0]["healing"]["restore_context"]["step"] == "step-47"
+
+
 # ── Singleton and convenience ──────────────────────────────────
 
 class TestSingleton:
@@ -350,6 +406,19 @@ class TestSingleton:
         # Just verify it doesn't crash
         result = detect_anomalies()
         assert isinstance(result, list)
+
+    def test_detect_and_heal_anomalies_convenience(self, monkeypatch):
+        detector = Mock()
+        detector.scan_and_heal.return_value = [{"agent_name": "A"}]
+        monkeypatch.setattr(
+            "ahy_governance.anomaly_detector.get_anomaly_detector",
+            lambda: detector,
+        )
+        result = detect_and_heal_anomalies(
+            health_monitor="hm", cost_tracker="ct", workspace_id="ws1",
+        )
+        assert result == [{"agent_name": "A"}]
+        detector.scan_and_heal.assert_called_once_with("hm", "ct", "ws1")
 
 
 # ── Reset ──────────────────────────────────────────────────────

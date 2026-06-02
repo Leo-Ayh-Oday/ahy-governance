@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { motion } from 'motion/react';
-import { ShieldCheck, Lock, Clock, EyeOff, DollarSign, Zap, Bell, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, Lock, Clock, EyeOff, DollarSign, Zap, Bell, AlertTriangle, Activity } from 'lucide-react';
 import type { PolicyRule, BudgetStatus } from '../../types';
 import { fetchPolicies, updatePolicy, fetchBudget } from '../../api';
 
@@ -121,7 +121,7 @@ export function PolicyControl() {
       {rules.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {rules.map((rule, i) => {
-            const icon = TRIGGER_ICONS[rule.trigger] ?? Zap;
+            const Icon = TRIGGER_ICONS[rule.trigger] ?? Zap;
             const color = TRIGGER_COLORS[rule.trigger] ?? 'slate';
             const cls = colorClasses(color);
             const isToggling = toggling.has(rule.id);
@@ -135,7 +135,7 @@ export function PolicyControl() {
                 <div className="flex justify-between items-start mb-6">
                   <div className="flex items-center gap-3">
                     <div className={`p-3 rounded-2xl border ${cls.bg} ${cls.text} ${cls.border}`}>
-                      {<icon size={20} />}
+                      <Icon size={20} />
                     </div>
                     <div>
                       <h4 className="font-bold text-base text-surface-800 dark:text-surface-50">{rule.name}</h4>

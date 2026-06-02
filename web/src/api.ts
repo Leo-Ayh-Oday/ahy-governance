@@ -7,8 +7,11 @@ import type {
   ConflictStats,
   RegisteredAgent,
   AnomalyEvent,
+  AnomalyFinding,
+  AnomalyHealResult,
   Announcement,
   PolicyRule,
+  RecoveryLedgerEntry,
 } from './types';
 
 const BASE = '/api';
@@ -49,6 +52,18 @@ export function fetchBudget(): Promise<BudgetStatus> {
 
 export function fetchAnomalies(): Promise<AnomalyEvent[]> {
   return request('/cost/anomalies');
+}
+
+export function fetchAnomalyScan(): Promise<AnomalyFinding[]> {
+  return request('/anomalies/scan');
+}
+
+export function scanAndHealAnomalies(): Promise<AnomalyHealResult[]> {
+  return request('/anomalies/scan-and-heal', { method: 'POST' });
+}
+
+export function fetchRecoveryHistory(limit = 20): Promise<RecoveryLedgerEntry[]> {
+  return request(`/recovery/history?limit=${limit}`);
 }
 
 // ── Audit ──
@@ -100,9 +115,9 @@ export function fetchAnnouncements(): Promise<Announcement[]> {
 export async function fetchPolicies(): Promise<{ policies: PolicyRule[] }> {
   const [budget, healthAgents, conflicts, anomalies] = await Promise.all([
     fetchBudget().catch(() => null),
-    fetchAgents().catch(() => []),
+    fetchAgents().catch((): AgentHealth[] => []),
     fetchConflictStats().catch(() => null),
-    fetchAnomalies().catch(() => []),
+    fetchAnomalies().catch((): AnomalyEvent[] => []),
   ]);
 
   const totalAgents = healthAgents.length;

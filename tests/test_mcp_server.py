@@ -19,6 +19,7 @@ from ahy_governance.mcp_server import (
     ahy_sanitize_prompt,
     ahy_log_audit,
     ahy_detect_anomalies,
+    ahy_detect_and_heal_anomalies,
     ahy_memory_write,
     ahy_memory_read,
     ahy_analyze_costs,
@@ -33,6 +34,7 @@ from ahy_governance.mcp_server import (
     ahy_self_heal,
     ahy_list_recovery_rules,
     ahy_recovery_history,
+    ahy_auto_heal_check,
 )
 
 
@@ -208,6 +210,21 @@ class TestDetectAnomalies:
         mock_detect.return_value = [FakeObj(anomaly_type="TOKEN_SPIKE")]
         result = json.loads(ahy_detect_anomalies())
         assert len(result) == 1
+
+    @patch("ahy_governance.anomaly_detector.detect_and_heal_anomalies")
+    def test_detect_and_heal_disabled_by_default(self, mock_detect, monkeypatch):
+        monkeypatch.delenv("AHY_MCP_FULL_AUTO", raising=False)
+        result = json.loads(ahy_detect_and_heal_anomalies("ws-1"))
+        assert "auto anomaly self-healing is disabled" in result["error"]
+        mock_detect.assert_not_called()
+
+    @patch("ahy_governance.anomaly_detector.detect_and_heal_anomalies")
+    def test_detect_and_heal_env_gate(self, mock_detect, monkeypatch):
+        monkeypatch.setenv("AHY_MCP_FULL_AUTO", "1")
+        mock_detect.return_value = [{"anomaly": {"agent": "A"}, "healing": {"status": "succeeded"}}]
+        result = json.loads(ahy_detect_and_heal_anomalies("ws-1"))
+        assert result[0]["anomaly"]["agent"] == "A"
+        mock_detect.assert_called_once_with(workspace_id="ws-1")
 
 
 # ── Memory Tools ──────────────────────────────────────────────
@@ -517,6 +534,23 @@ class TestSelfHealTools:
         mock_get.return_value = mock_healer
         result = json.loads(ahy_self_heal("B", "timeout", "err", context_json='{"retry": 3}'))
         assert result["agent_name"] == "B"
+
+    @patch("ahy_governance.health_monitor.get_monitor")
+    def test_ahy_auto_heal_check_disabled_by_default(self, mock_get, monkeypatch):
+        monkeypatch.delenv("AHY_MCP_FULL_AUTO", raising=False)
+        result = json.loads(ahy_auto_heal_check("ws-1"))
+        assert "auto self-healing checks are disabled" in result["error"]
+        mock_get.assert_not_called()
+
+    @patch("ahy_governance.health_monitor.get_monitor")
+    def test_ahy_auto_heal_check_env_gate(self, mock_get, monkeypatch):
+        monkeypatch.setenv("AHY_MCP_FULL_AUTO", "1")
+        mock_monitor = MagicMock()
+        mock_monitor.auto_heal_check.return_value = [{"agent_name": "A"}]
+        mock_get.return_value = mock_monitor
+        result = json.loads(ahy_auto_heal_check("ws-1"))
+        assert result == [{"agent_name": "A"}]
+        mock_monitor.auto_heal_check.assert_called_once_with("ws-1")
 
     def test_clamp_limit(self):
         assert _clamp_limit(0) == 1

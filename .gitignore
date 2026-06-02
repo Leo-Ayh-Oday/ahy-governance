@@ -26,6 +26,9 @@ web/package-lock.json
 data/
 promo-video/
 content/
+.coverage
+ahy_governance.db
+test_mcp_protocol.db*
 
 # IDE / editor
 .wolf/

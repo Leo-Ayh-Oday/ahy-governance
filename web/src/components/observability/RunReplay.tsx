@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play, Pause, SkipBack, SkipForward, Clock, Cpu, AlertTriangle, CheckCircle, XCircle, Zap, ChevronDown } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Clock, Cpu, AlertTriangle, CheckCircle, XCircle, Zap, ChevronDown, type LucideIcon } from 'lucide-react';
 const BASE = '/api';
 
 async function apiRequest<T>(path: string): Promise<T> {
@@ -40,7 +40,7 @@ const EVENT_COLORS: Record<string, string> = {
   GOVERNOR_LOG: 'bg-slate-100 text-slate-700 dark:bg-slate-500/10 dark:text-slate-400',
 };
 
-const EVENT_ICONS: Record<string, React.FC<{ size?: number }>> = {
+const EVENT_ICONS: Record<string, LucideIcon> = {
   PIPELINE_START: Zap,
   PIPELINE_COMPLETE: CheckCircle,
   AGENT_START: Play,

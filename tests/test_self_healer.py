@@ -159,6 +159,16 @@ class TestHealResult:
         d = r.to_dict()
         assert d["action"]["action_type"] == "retry"
 
+    def test_restore_context_serialized(self):
+        r = HealResult(
+            agent_name="B", incident_type=IncidentType.TIMEOUT,
+            status=RecoveryStatus.ATTEMPTED,
+            restore_context={"session_id": "s1", "state": {"step": 47}},
+        )
+        d = r.to_dict()
+        assert d["restore_context"]["session_id"] == "s1"
+        assert d["restore_context"]["state"]["step"] == 47
+
 
 # ── Rule Engine ───────────────────────────────────────────────
 
@@ -318,6 +328,31 @@ class TestSelfHealerRuleOnly:
         healer.set_llm_doctor(doctor)
         result = healer.self_heal("A", IncidentType.TIMEOUT, "timeout")
         assert result.diagnosed_by == "system"  # escalated, not llm
+
+    def test_rule_result_includes_checkpoint_restore_context(self):
+        healer = SelfHealer(level=SelfHealLevel.RULE_ONLY)
+        healer.load_rules(default_recovery_rules())
+        result = healer.self_heal(
+            "Agent1", IncidentType.TIMEOUT, "Request timed out after 30s",
+            context={
+                "checkpoint": {
+                    "checkpoint_id": 7,
+                    "agent_name": "Agent1",
+                    "session_id": "s1",
+                    "step": "step-47",
+                    "created_at": "2026-06-02T00:00:00+00:00",
+                    "state": {"goal": "continue", "step": 47},
+                }
+            },
+        )
+        assert result.restore_context == {
+            "agent_name": "Agent1",
+            "session_id": "s1",
+            "checkpoint_id": 7,
+            "step": "step-47",
+            "created_at": "2026-06-02T00:00:00+00:00",
+            "state": {"goal": "continue", "step": 47},
+        }
 
 
 # ── Self Healer: LLM_ASSISTED ──────────────────────────────────

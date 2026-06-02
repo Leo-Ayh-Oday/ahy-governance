@@ -300,6 +300,7 @@ class HealthMonitor:
 
         Returns list of HealResult dicts, one per agent that was checked.
         """
+        from .checkpoint_store import get_checkpoint_store
         from .self_healer import get_healer, IncidentType
 
         unhealthy = self.get_unhealthy_agents(workspace_id)
@@ -312,11 +313,18 @@ class HealthMonitor:
             except ValueError:
                 it = IncidentType.UNKNOWN
 
+            context = {"metrics": md}
+            checkpoint = get_checkpoint_store().load_latest(
+                m.agent_name, workspace_id=workspace_id,
+            )
+            if checkpoint:
+                context["checkpoint"] = checkpoint.to_dict()
+
             heal_result = get_healer().self_heal(
                 m.agent_name, it,
                 f"Agent {m.agent_name} is {md.get('status', 'unhealthy')} "
                 f"(success_rate={md.get('success_rate', 0):.1%}, p95={md.get('latency_p95', 0):.0f}ms)",
-                context={"metrics": md},
+                context=context,
                 workspace_id=workspace_id,
             )
             results.append(heal_result.to_dict())

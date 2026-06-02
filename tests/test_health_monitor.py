@@ -1,6 +1,7 @@
 """Health Monitor 测试 — 心跳/延迟百分位/错误率/DAG 可视化"""
 
 import time
+from unittest.mock import Mock
 
 import pytest
 
@@ -219,6 +220,65 @@ class TestUnhealthyAgents:
             monitor.heartbeat("A", "ok", 50)
             monitor.record_call("A", True, 50)
         assert monitor.get_unhealthy_agents() == []
+
+
+class TestAutoHealCheck:
+    def test_passes_latest_checkpoint_context(self, monitor, monkeypatch):
+        from ahy_governance.checkpoint_store import Checkpoint
+        from ahy_governance.self_healer import (
+            HealResult,
+            IncidentType,
+            RecoveryStatus,
+        )
+
+        checkpoint = Checkpoint(
+            checkpoint_id=47,
+            agent_name="Worker",
+            session_id="s1",
+            state={"step": 47, "task": "resume"},
+            step="step-47",
+            created_at="2026-06-02T00:00:00+00:00",
+        )
+        checkpoint_store = Mock()
+        checkpoint_store.load_latest.return_value = checkpoint
+        healer = Mock()
+
+        def fake_self_heal(agent_name, incident_type, error_message, context, workspace_id):
+            return HealResult(
+                agent_name=agent_name,
+                incident_type=incident_type,
+                status=RecoveryStatus.SUCCEEDED,
+                diagnosed_by="test",
+                restore_context={
+                    "checkpoint_id": context["checkpoint"]["checkpoint_id"],
+                    "step": context["checkpoint"]["step"],
+                    "state": context["checkpoint"]["state"],
+                },
+            )
+
+        healer.self_heal.side_effect = fake_self_heal
+        monkeypatch.setattr(
+            "ahy_governance.checkpoint_store.get_checkpoint_store",
+            lambda: checkpoint_store,
+        )
+        monkeypatch.setattr("ahy_governance.self_healer.get_healer", lambda: healer)
+
+        for _ in range(10):
+            monitor.heartbeat("Worker", "ok", 100)
+            monitor.record_call("Worker", success=False, latency_ms=100)
+
+        results = monitor.auto_heal_check(workspace_id="ws1")
+
+        checkpoint_store.load_latest.assert_called_once_with("Worker", workspace_id="ws1")
+        healer.self_heal.assert_called_once()
+        args, kwargs = healer.self_heal.call_args
+        incident_type = args[1]
+        assert incident_type == IncidentType.EXECUTION_ERROR
+        assert kwargs["workspace_id"] == "ws1"
+        assert kwargs["context"]["checkpoint"]["checkpoint_id"] == 47
+        assert kwargs["context"]["checkpoint"]["state"]["step"] == 47
+        assert results[0]["restore_context"]["checkpoint_id"] == 47
+        assert results[0]["restore_context"]["step"] == "step-47"
 
 
 # ── Pipeline DAG Tests ──────────────────────────────────────────

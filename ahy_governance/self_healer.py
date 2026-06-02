@@ -109,6 +109,20 @@ def is_recovery_action_allowed(
     return True
 
 
+def _restore_context_from_context(context: dict) -> dict | None:
+    checkpoint = context.get("checkpoint")
+    if not isinstance(checkpoint, dict):
+        return None
+    return {
+        "agent_name": checkpoint.get("agent_name", ""),
+        "session_id": checkpoint.get("session_id", ""),
+        "checkpoint_id": checkpoint.get("checkpoint_id") or checkpoint.get("id", 0),
+        "step": checkpoint.get("step", ""),
+        "created_at": checkpoint.get("created_at", ""),
+        "state": checkpoint.get("state", {}),
+    }
+
+
 # ── Data Classes ────────────────────────────────────────────────
 
 @dataclass
@@ -497,6 +511,7 @@ class SelfHealer:
             agent_name=agent_name, incident_type=incident_type,
             action=action, status=status, diagnosed_by=diagnosed_by,
             ledger_entry=entry,
+            restore_context=_restore_context_from_context(context),
             detail=f"{diagnosed_by} → {action.action_type.value}: {action.description}",
         )
 
@@ -530,6 +545,7 @@ class SelfHealer:
             agent_name=agent_name, incident_type=incident_type,
             action=action, status=RecoveryStatus.ESCALATED, diagnosed_by="system",
             ledger_entry=entry,
+            restore_context=_restore_context_from_context(context),
             detail=f"已升级到人工: {error_message[:100]}",
         )
 

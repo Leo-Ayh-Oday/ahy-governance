@@ -51,6 +51,63 @@ export interface AnomalyEvent {
   timestamp: string;
 }
 
+export interface AnomalyFinding {
+  type: string;
+  agent: string;
+  severity: string;
+  description: string;
+  current_value: number;
+  baseline_value: number;
+  threshold: number;
+  timestamp: string;
+  evidence: Record<string, unknown>;
+}
+
+export interface RestoreContext {
+  agent_name?: string;
+  session_id?: string;
+  checkpoint_id?: number;
+  step?: string;
+  created_at?: string;
+  state?: Record<string, unknown>;
+}
+
+export interface HealingResult {
+  agent_name: string;
+  incident_type: string;
+  action: {
+    action_type: string;
+    description: string;
+    params: Record<string, unknown>;
+    confidence: number;
+    source: string;
+  } | null;
+  status: string;
+  diagnosed_by: string;
+  detail: string;
+  incident_id: number;
+  restore_context: RestoreContext | null;
+}
+
+export interface AnomalyHealResult {
+  anomaly: AnomalyFinding;
+  healing: HealingResult;
+}
+
+export interface RecoveryLedgerEntry {
+  id?: number;
+  incident_id?: number;
+  agent_name: string;
+  incident_type: string;
+  error_message?: string;
+  recovery_action: string;
+  diagnosed_by?: string;
+  success?: number | boolean;
+  confidence?: number;
+  evidence?: string | Record<string, unknown>;
+  timestamp?: string;
+}
+
 // ── Audit ──
 export interface AuditEvent {
   index: number;
