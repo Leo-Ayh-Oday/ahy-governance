@@ -1,0 +1,20 @@
+{
+  "description": "Open-source AI Agent governance: conflict detection, cost control, compliance audit, self-healing. Deploy agents with confidence.",
+  "homepage": "https://github.com/Leo-Ayh-Oday/ahy-governance#readme",
+  "topics": [
+    "ai-agents",
+    "governance",
+    "compliance",
+    "multi-agent",
+    "agent-orchestration",
+    "soc2",
+    "audit-logging",
+    "cost-tracking",
+    "prompt-injection",
+    "open-source",
+    "python",
+    "claude-mcp",
+    "langchain",
+    "crewai"
+  ]
+}
