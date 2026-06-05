@@ -8,6 +8,8 @@
 [![Version](https://img.shields.io/badge/version-0.9.1-orange)](https://pypi.org/project/ahy-governance/)
 [![Downloads](https://img.shields.io/pypi/dm/ahy-governance)](https://pypi.org/project/ahy-governance/)
 
+**Topics:** `ai-agents` `governance` `compliance` `multi-agent` `agent-orchestration` `soc2` `audit-logging` `cost-tracking` `prompt-injection` `open-source` `python` `claude-mcp` `langchain` `crewai`
+
 [中文文档](README_CN.md)
 
 ## Recent Updates
