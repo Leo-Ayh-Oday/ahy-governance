@@ -1,3 +1,4 @@
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -7,7 +8,11 @@ build/
 venv/
 .pytest_cache/
 *.egg
-.DS_Store
+.coverage
+.coverage.*
+htmlcov/
+
+# Secrets & environment
 .secrets/
 .env
 .env.local
@@ -26,14 +31,22 @@ web/package-lock.json
 data/
 promo-video/
 content/
-.coverage
-ahy_governance.db
-test_mcp_protocol.db*
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
 
 # IDE / editor
-.wolf/
-.codegraph/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
 .claude/
-
-# Auth database
-auth.db
+.codegraph/
+.wolf/
+.DS_Store
+Thumbs.db

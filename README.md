@@ -3,10 +3,13 @@
 **Open-source AI Agent governance. Deploy agents with confidence — conflict detection, cost control, audit trails, compliance ready.**
 
 [![Tests](https://github.com/Leo-Ayh-Oday/ahy-governance/actions/workflows/test.yml/badge.svg)](https://github.com/Leo-Ayh-Oday/ahy-governance/actions/workflows/test.yml)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
-[![License](https://img.shields.io/badge/license-MIT-purple)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.9.1-orange)](https://pypi.org/project/ahy-governance/)
+[![Coverage](https://img.shields.io/badge/coverage-81%25-brightgreen)](https://github.com/Leo-Ayh-Oday/ahy-governance/actions/workflows/test.yml)
+[![Python](https://img.shields.io/badge/python-3.10_%7C_3.11_%7C_3.12-blue)](https://python.org)
+[![PyPI](https://img.shields.io/pypi/v/ahy-governance?color=orange)](https://pypi.org/project/ahy-governance/)
 [![Downloads](https://img.shields.io/pypi/dm/ahy-governance)](https://pypi.org/project/ahy-governance/)
+[![License](https://img.shields.io/badge/license-MIT-purple)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/Leo-Ayh-Oday/ahy-governance?style=social)](https://github.com/Leo-Ayh-Oday/ahy-governance/stargazers)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
 **Topics:** `ai-agents` `governance` `compliance` `multi-agent` `agent-orchestration` `soc2` `audit-logging` `cost-tracking` `prompt-injection` `open-source` `python` `claude-mcp` `langchain` `crewai`
 
@@ -90,7 +93,7 @@ Ahy Governance is purpose-built for teams running 5+ agents that collaborate, co
 ```bash
 pip install ahy-governance[web]
 ahy-dashboard
-# Open http://localhost:8080 — click "Demo Data" to populate
+# Open http://localhost:8081 — click "Demo Data" to populate
 ```
 
 Or use the MCP integration — govern agents directly from Claude Code:
@@ -222,7 +225,10 @@ Questions or feedback? Open an issue or email [2115464137@qq.com](mailto:2115464
 
 ## Contributing
 
-PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, code style, and PR workflow.
+
+This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md) code of conduct.
+To report a security vulnerability, see [SECURITY.md](SECURITY.md).
 
 ---
 

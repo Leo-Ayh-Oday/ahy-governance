@@ -3,10 +3,13 @@
 **开源 AI Agent 治理平台。自动发现 · 冲突检测 · 成本追踪 · 自愈恢复 · 审计存证 — 14 模块，900+ 测试，MIT。**
 
 [![Tests](https://github.com/Leo-Ayh-Oday/ahy-governance/actions/workflows/test.yml/badge.svg)](https://github.com/Leo-Ayh-Oday/ahy-governance/actions/workflows/test.yml)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
-[![License](https://img.shields.io/badge/license-MIT-purple)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.9.1-orange)](https://pypi.org/project/ahy-governance/)
+[![Coverage](https://img.shields.io/badge/coverage-81%25-brightgreen)](https://github.com/Leo-Ayh-Oday/ahy-governance/actions/workflows/test.yml)
+[![Python](https://img.shields.io/badge/python-3.10_%7C_3.11_%7C_3.12-blue)](https://python.org)
+[![PyPI](https://img.shields.io/pypi/v/ahy-governance?color=orange)](https://pypi.org/project/ahy-governance/)
 [![Downloads](https://img.shields.io/pypi/dm/ahy-governance)](https://pypi.org/project/ahy-governance/)
+[![License](https://img.shields.io/badge/license-MIT-purple)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/Leo-Ayh-Oday/ahy-governance?style=social)](https://github.com/Leo-Ayh-Oday/ahy-governance/stargazers)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
 [English](README.md)
 
@@ -81,7 +84,7 @@ LangSmith 和 LangFuse 是优秀的 LLM 追踪工具，但它们不理解多 Age
 ```bash
 pip install ahy-governance[web]
 ahy-dashboard
-# 浏览器打开 http://localhost:8080，点 "Demo Data" 查看演示数据
+# 浏览器打开 http://localhost:8081，点 "Demo Data" 查看演示数据
 ```
 
 MCP 集成——在 Claude Code 里直接治理 Agent：
@@ -207,6 +210,15 @@ ahy-dashboard
 - **Discussions**: [GitHub Discussions](https://github.com/Leo-Ayh-Oday/ahy-governance/discussions) — 提问、建议、反馈
 - **Issues**: [GitHub Issues](https://github.com/Leo-Ayh-Oday/ahy-governance/issues) — Bug 报告、功能请求
 - **加星收藏**：如果觉得有用，给个 Star 让更多人看到
+
+---
+
+## 参与贡献
+
+欢迎提 PR。详见 [CONTRIBUTING_CN.md](CONTRIBUTING_CN.md) 了解开发环境搭建、代码风格和 PR 流程。
+
+本项目遵循 [Contributor Covenant](CODE_OF_CONDUCT.md) 行为准则。
+安全漏洞请查看 [SECURITY_CN.md](SECURITY_CN.md) 了解报告流程。
 
 ---
 
