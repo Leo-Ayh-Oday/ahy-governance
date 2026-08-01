@@ -7,10 +7,28 @@
 
 ## [未发布]
 
+## [0.10.0] — 2026-08-01
+
+治理控制闭环 MVP — 收口 Phase 稳定化。
+
 ### 新增
+- **治理运行时核心** — `GovernanceContext` / `GovernanceDecision` / `GovernanceEngine`，合并语义 BLOCK > REDACT > WARN > ALLOW
+- **GovernanceGateway** — Web / MCP / SDK 统一路由层，四态路由（legacy / shadow / runtime / disabled）
+- **Prompt Guard Shadow → Runtime** — Runtime 评估器权威裁决 + Legacy 回退（`legacy_fallback_count`）；Shadow 账本记录迁移期差异
+- **Budget Preflight Shadow → Runtime** — 纯读预算预检（绝不重复记账），返回 `BudgetPreflightResult`；旧 CostTracker 仍负责记录
+- **多租户隔离 E2E** — 存储按 `workspace_id` 隔离、复合主键、中间件上下文解析（X-Workspace-Id / ApiKey / 匿名）、RBAC 三级强制
+- **治理主链 E2E** — 51 个真实场景：Web / MCP / SDK → Gateway → Engine → legacy
 - 恢复学习引擎 — 从恢复账本中自动学习新的自愈规则
 - DeepSeek LLMDoctor 集成 — LLM 辅助的事故诊断
 - 自动触发自愈 + 检查点/恢复上下文
+
+### 变更
+- Web / MCP / SDK 的 guard + 成本调用统一经 GovernanceGateway
+- 测试套件：930 → 1140 全部通过（多租户 24 + 治理主链 51）
+
+### 修复
+- **P0 跨租户数据泄漏** — `PUBLIC_API_*` 常量是字符串（缺尾逗号），导致所有 `/api/*` 路径恒为 public；workspace 上下文从未解析
+- **P0 PII 死代码** — Runtime 模式下 Prompt Guard REDACT 分支永不触发（PII 改用 `redaction_count` 检测）
 
 ## [0.9.0] — 2026-05-31
 
@@ -61,7 +79,8 @@
 - 多 Agent 编排基础能力
 - 基础可观测性钩子
 
-[未发布]: https://github.com/Leo-Ayh-Oday/ahy-governance/compare/v0.9.0...HEAD
+[未发布]: https://github.com/Leo-Ayh-Oday/ahy-governance/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/Leo-Ayh-Oday/ahy-governance/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Leo-Ayh-Oday/ahy-governance/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Leo-Ayh-Oday/ahy-governance/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Leo-Ayh-Oday/ahy-governance/compare/v0.1.0...v0.7.0

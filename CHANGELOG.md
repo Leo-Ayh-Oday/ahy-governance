@@ -7,10 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-08-01
+
+Governance Control Loop MVP — 收口 Phase 稳定化.
+
 ### Added
+- **Governance Runtime Core** — `GovernanceContext` / `GovernanceDecision` / `GovernanceEngine` with merge semantics (BLOCK > REDACT > WARN > ALLOW)
+- **GovernanceGateway** — single routing layer for Web / MCP / SDK entry points, four route states (legacy / shadow / runtime / disabled)
+- **Prompt Guard Shadow → Runtime** — Runtime evaluator authoritative with legacy fallback (`legacy_fallback_count`); Shadow Ledger records diffs during migration
+- **Budget Preflight Shadow → Runtime** — pure-read budget check (never double-accounts), returns `BudgetPreflightResult`; legacy CostTracker still records
+- **Multi-Tenant Isolation E2E** — storage scoping by `workspace_id`, composite PK, middleware context resolution (X-Workspace-Id / ApiKey / anonymous), RBAC 3-tier enforcement
+- **Governance Main-Chain E2E** — 51 real scenarios: Web / MCP / SDK → Gateway → Engine → legacy
 - Recovery Learning Agent — auto-learn new self-healing rules from the recovery ledger
 - DeepSeek LLMDoctor integration for LLM-assisted incident diagnosis
 - Auto-trigger self-healing with checkpoint/restore context
+
+### Changed
+- Web / MCP / SDK guard + cost calls unified through GovernanceGateway
+- Test suite: 930 → 1140 passed (multi-tenant 24 + governance main-chain 51)
+
+### Fixed
+- **P0 cross-tenant data leak** — `PUBLIC_API_*` constants were strings (missing trailing comma), making every `/api/*` path public; workspace context never resolved
+- **P0 PII dead code** — Prompt Guard REDACT branch never triggered in Runtime Mode (PII now detected via `redaction_count`)
 
 ## [0.9.0] — 2026-05-31
 
@@ -61,7 +79,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-agent orchestration primitives
 - Basic observability hooks
 
-[Unreleased]: https://github.com/Leo-Ayh-Oday/ahy-governance/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Leo-Ayh-Oday/ahy-governance/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/Leo-Ayh-Oday/ahy-governance/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Leo-Ayh-Oday/ahy-governance/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Leo-Ayh-Oday/ahy-governance/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Leo-Ayh-Oday/ahy-governance/compare/v0.1.0...v0.7.0

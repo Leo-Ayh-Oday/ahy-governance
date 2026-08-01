@@ -30,6 +30,9 @@ ahy-dashboard
 - [AGP Protocol](agp-agent-governance-protocol.md) — Agent Governance Protocol spec
 - [Self-Healing Runbook](self-healing-production-runbook.md) — production operations guide
 - [MCP Setup](mcp-setup/) — Claude Desktop and Cursor integration
+- [优化与改进计划](ahy_governance_optimization_plan.md) — v0.9.1→v1.0.0 完整路线图（10周主线+4周可选）
+- [重构进度](progress.md) — 当前进度快照，重启后无缝衔接
+- [模块状态矩阵](status-matrix.md) — 48 模块全量分类（WIRED/PARTIAL/LIBRARY_ONLY）
 - [使用教程](使用教程.md) — tutorial in Chinese
 
 ## Links
